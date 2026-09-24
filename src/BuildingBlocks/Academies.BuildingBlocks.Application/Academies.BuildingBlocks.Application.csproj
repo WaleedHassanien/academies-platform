@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Academies.BuildingBlocks.Domain\Academies.BuildingBlocks.Domain.csproj" />
+    <ProjectReference Include="..\Academies.Contracts\Academies.Contracts.csproj" />
+  </ItemGroup>
+</Project>

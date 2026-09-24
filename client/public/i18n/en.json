@@ -1,0 +1,409 @@
+{
+  "app": {
+    "name": "Academies Platform",
+    "switchLanguage": "العربية",
+    "menu": "Menu"
+  },
+  "nav": {
+    "home": "Home",
+    "users": "Users",
+    "students": "Students",
+    "staff": "Teachers & supervisors",
+    "groups": "Groups",
+    "courses": "Courses",
+    "sessions": "Sessions",
+    "assignments": "Assignments",
+    "certificates": "Certificates",
+    "payments": "Payment plans",
+    "paymentLogs": "Payment log",
+    "pay": "Pay settings",
+    "salaries": "Salaries",
+    "salaryLogs": "Salary log",
+    "expenses": "Expenses",
+    "reports": "Financial reports",
+    "dashboard": "Analytics",
+    "audit": "Audit log",
+    "subscription": "Subscription",
+    "parentPortal": "Parent portal",
+    "me": "My account",
+    "notifications": "Notifications"
+  },
+  "navSection": {
+    "platform": "Platform",
+    "academy": "Academy",
+    "learning": "Learning",
+    "finance": "Finance",
+    "me": "Me"
+  },
+  "auth": {
+    "loginTitle": "Sign in",
+    "email": "Email",
+    "password": "Password",
+    "togglePassword": "Show/hide password",
+    "signIn": "Sign in",
+    "logout": "Sign out",
+    "loginFailed": "Couldn't sign in. Check your details and try again.",
+    "forgotPassword": "Forgot password?",
+    "resetTitle": "Reset password",
+    "resetHint": "Enter your email and we'll send you a 6-digit code.",
+    "sendCode": "Send code",
+    "codeSent": "If the email is registered, a code valid for 30 minutes has been sent.",
+    "code": "Reset code",
+    "newPassword": "New password",
+    "passwordRules": "At least 8 characters, with upper and lower case letters and a digit",
+    "resetPassword": "Set password",
+    "resetFailed": "Couldn't reset the password.",
+    "backToLogin": "Back to sign in"
+  },
+  "home": {
+    "welcome": "Welcome, {{name}}"
+  },
+  "roles": {
+    "SuperAdmin": "Platform admin",
+    "Admin": "Academy admin",
+    "Manager": "Manager",
+    "Supervisor": "Supervisor",
+    "Teacher": "Teacher",
+    "Student": "Student",
+    "Parent": "Parent",
+    "Accountant": "Accountant",
+    "Staff": "Staff"
+  },
+  "common": {
+    "saved": "Saved",
+    "error": "Something went wrong",
+    "close": "Close",
+    "create": "Create",
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "delete": "Delete",
+    "remove": "Remove",
+    "add": "Add",
+    "search": "Search",
+    "all": "All",
+    "status": "Status",
+    "name": "Name",
+    "fullName": "Full name",
+    "address": "Address",
+    "created": "Created",
+    "active": "Active",
+    "inactive": "Inactive",
+    "noData": "Nothing here yet",
+    "from": "From",
+    "to": "To",
+    "apply": "Apply",
+    "reason": "Reason",
+    "phone": "Phone",
+    "description": "Description",
+    "title": "Title",
+    "type": "Type",
+    "date": "Date",
+    "time": "Time",
+    "notes": "Notes",
+    "amount": "Amount",
+    "previous": "Previous",
+    "next": "Next",
+    "back": "Back"
+  },
+  "status": {
+    "Active": "Active",
+    "Suspended": "Suspended",
+    "Trial": "Trial",
+    "Expired": "Expired",
+    "Graduated": "Graduated",
+    "Withdrawn": "Withdrawn",
+    "Scheduled": "Scheduled",
+    "Completed": "Completed",
+    "Cancelled": "Cancelled",
+    "Present": "Present",
+    "Late": "Late",
+    "Absent": "Absent",
+    "Due": "Due",
+    "PartiallyPaid": "Partially paid",
+    "Paid": "Paid",
+    "Overdue": "Overdue",
+    "Pending": "Pending"
+  },
+  "platform": {
+    "academies": "Academies",
+    "newAcademy": "New academy",
+    "academyName": "Academy name",
+    "adminName": "Admin name",
+    "adminEmail": "Admin email",
+    "adminPassword": "Admin password",
+    "users": "Users",
+    "subscription": "Subscription",
+    "suspend": "Suspend",
+    "activate": "Activate",
+    "trialEnds": "Trial ends",
+    "assignPlan": "Assign plan",
+    "plan": "Plan",
+    "endsOn": "Ends on",
+    "startAsTrial": "Start as trial",
+    "extendTrial": "Extend trial",
+    "days": "Days",
+    "extend": "Extend",
+    "overrides": "Academy-specific limits",
+    "limit": "Limit",
+    "planValue": "Plan limit",
+    "override": "Override",
+    "unlimitedHint": "-1 means unlimited",
+    "plans": "Plans & prices",
+    "newPlan": "New plan",
+    "month": "month",
+    "trialDays": "trial days",
+    "code": "Code",
+    "monthlyPrice": "Monthly price",
+    "order": "Order",
+    "limits": "Limits",
+    "features": "Features",
+    "priceHistory": "Price history"
+  },
+  "limits": {
+    "students": "Students",
+    "teachers": "Teachers",
+    "users": "Users"
+  },
+  "features": {
+    "online_sessions": "Online sessions",
+    "certificates": "Certificates",
+    "gamification": "Points & badges",
+    "payment_gateway": "Online payments",
+    "analytics": "Analytics dashboards"
+  },
+  "users": {
+    "new": "New user",
+    "edit": "Edit user",
+    "plan": "Plan",
+    "roles": "Roles",
+    "role": "Role",
+    "lastLogin": "Last sign-in",
+    "deactivate": "Deactivate",
+    "activate": "Activate"
+  },
+  "dashboard": {
+    "activeStudents": "Active students",
+    "teachers": "Teachers",
+    "sessionsCompleted": "Sessions completed",
+    "scheduled": "Scheduled",
+    "attendanceRate": "Attendance rate",
+    "sessionsAndAttendance": "Sessions & attendance by month",
+    "revenueVsCosts": "Revenue vs costs",
+    "topTeachers": "Most active teachers",
+    "unavailable": "Analytics isn't available on your plan or for your role."
+  },
+  "finance": {
+    "revenue": "Revenue",
+    "net": "Net profit",
+    "outstanding": "Outstanding",
+    "salaries": "Salaries",
+    "expenses": "Expenses",
+    "refunds": "Refunds"
+  },
+  "audit": {
+    "service": "Service",
+    "action": "Action",
+    "when": "When",
+    "who": "Who",
+    "entity": "Item",
+    "data": "Details",
+    "system": "System"
+  },
+  "subscription": {
+    "available": "Available plans",
+    "upgradeHint": "To upgrade or change limits, contact the platform team."
+  },
+  "students": {
+    "hint": "Add students on the Users screen with the Student role, then complete their details here.",
+    "level": "Level",
+    "parent": "Parent",
+    "enrolled": "Enrolled"
+  },
+  "staff": {
+    "teachers": "Teachers",
+    "supervisors": "Supervisors",
+    "parents": "Parents",
+    "specialization": "Specialization",
+    "bio": "Bio",
+    "students": "Students",
+    "assignStudents": "Assign students",
+    "assignTeachers": "Assign teachers",
+    "workSchedule": "Work days & shift",
+    "day": "Day",
+    "workingDay": "Working day",
+    "shiftStart": "Shift start",
+    "shiftEnd": "Shift end",
+    "children": "Children",
+    "dayOff": "Day off"
+  },
+  "days": {
+    "Saturday": "Saturday",
+    "Sunday": "Sunday",
+    "Monday": "Monday",
+    "Tuesday": "Tuesday",
+    "Wednesday": "Wednesday",
+    "Thursday": "Thursday",
+    "Friday": "Friday"
+  },
+  "groups": {
+    "new": "New group"
+  },
+  "courses": {
+    "new": "New course",
+    "materials": "Materials"
+  },
+  "materialType": {
+    "Link": "Link",
+    "Document": "Document",
+    "Video": "Video"
+  },
+  "sessions": {
+    "new": "New session",
+    "duration": "Duration (minutes)",
+    "offline": "In person",
+    "online": "Online",
+    "location": "Location",
+    "meetingUrl": "Meeting link",
+    "generateLink": "Generate online link",
+    "repeatWeeks": "Repeat weekly (weeks)",
+    "thisWeek": "This week",
+    "join": "Join",
+    "attendance": "Attendance & feedback",
+    "complete": "Mark completed",
+    "cancel": "Cancel session",
+    "none": "No sessions",
+    "rating": "Rating",
+    "comment": "Comment",
+    "noRoster": "No students in this session",
+    "saveAttendance": "Save attendance",
+    "saveFeedback": "Save feedback"
+  },
+  "assignments": {
+    "new": "New assignment",
+    "wholeCourse": "Whole course",
+    "due": "Due",
+    "maxScore": "Max score",
+    "myResult": "My result",
+    "submissions": "Submissions",
+    "submitted": "Submitted",
+    "notSubmitted": "Not submitted",
+    "submit": "Submit",
+    "feedback": "Teacher feedback",
+    "answer": "Answer",
+    "attachment": "Attachment link",
+    "submittedAt": "Submitted at",
+    "score": "Score",
+    "late": "Late",
+    "grade": "Grade"
+  },
+  "certificates": {
+    "issue": "Issue certificate",
+    "number": "Certificate no.",
+    "issued": "Issued"
+  },
+  "payments": {
+    "newPlan": "New monthly payment plan",
+    "monthlyAmount": "Monthly amount",
+    "startDate": "Start date",
+    "months": "Months",
+    "dueDay": "Due day",
+    "period": "Period",
+    "paid": "Paid",
+    "month": "Month",
+    "due": "Due",
+    "monthN": "Month {{n}}",
+    "record": "Record payment",
+    "refund": "Refund",
+    "method": "Method",
+    "reference": "Reference",
+    "totalPaid": "Total paid",
+    "totalRefunded": "Total refunded",
+    "action": "Action",
+    "currency": "Academy currency",
+    "currencyHint": "Applies to new plans; existing plans keep their currency."
+  },
+  "method": {
+    "Cash": "Cash",
+    "BankTransfer": "Bank transfer",
+    "Card": "Card",
+    "Online": "Online"
+  },
+  "paymentAction": {
+    "Created": "Created",
+    "Paid": "Paid",
+    "PartiallyPaid": "Partially paid",
+    "Refunded": "Refunded",
+    "Cancelled": "Cancelled"
+  },
+  "pay": {
+    "hint": "Teachers are paid per completed session; supervisors and staff a fixed monthly salary. Each change applies from its date.",
+    "payType": "Pay type",
+    "effectiveFrom": "Effective from",
+    "PerSession": "Per session",
+    "MonthlyFixed": "Fixed monthly",
+    "ratePerSession": "Rate per session",
+    "monthlySalary": "Monthly salary",
+    "history": "History"
+  },
+  "salaries": {
+    "generate": "Calculate month's salaries",
+    "result": "New {{created}} · recalculated {{regenerated}} · unchanged {{unchanged}} · already paid {{skippedPaid}}",
+    "thisMonth": "This month",
+    "calculation": "Calculation",
+    "pay": "Pay",
+    "adjust": "Documented adjustment",
+    "none": "No salaries for this month yet. Click \"Calculate month's salaries\"."
+  },
+  "salaryAction": {
+    "Created": "Created",
+    "Regenerated": "Recalculated",
+    "Paid": "Paid",
+    "Adjusted": "Adjusted"
+  },
+  "expenses": {
+    "category": "Category"
+  },
+  "student": {
+    "points": "My points",
+    "upcoming": "My upcoming sessions",
+    "feedback": "Latest feedback",
+    "badges": "Badges",
+    "pointsShort": "pts",
+    "leaderboard": "Leaderboard"
+  },
+  "teacher": {
+    "students": "My students",
+    "completedThisMonth": "Completed this month",
+    "pending": "Awaiting completion",
+    "pendingHint": "Ended but not marked completed",
+    "upcoming": "Next 7 days"
+  },
+  "supervisor": {
+    "teachers": "My teachers"
+  },
+  "badges": {
+    "BRONZE": "Bronze",
+    "SILVER": "Silver",
+    "GOLD": "Gold",
+    "PLATINUM": "Platinum"
+  },
+  "parent": {
+    "payments": "Monthly payments",
+    "payOnline": "Pay with PayPal",
+    "noChildren": "No children are linked to your account yet.",
+    "payment_success": "Payment received via PayPal. Thank you!",
+    "payment_pending": "PayPal is still processing your payment; it will show here once it completes.",
+    "payment_failed": "The payment did not go through. Nothing was charged; please try again.",
+    "payment_cancelled": "Payment cancelled.",
+    "chargeConfirm": "Amount due is {{amount}} {{currency}}. PayPal will charge the equivalent {{charged}} {{chargedCurrency}}. Continue?"
+  },
+  "notifications": {
+    "readAll": "Mark all as read",
+    "none": "No notifications"
+  },
+  "currency": {
+    "USD": "US dollar (USD)",
+    "EGP": "Egyptian pound (EGP)"
+  }
+}

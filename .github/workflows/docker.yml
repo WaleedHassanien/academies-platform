@@ -1,0 +1,57 @@
+name: Docker images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: identity-api
+            context: .
+            dockerfile: src/Services/Identity/Academies.Identity.Api/Dockerfile
+          - name: subscription-api
+            context: .
+            dockerfile: src/Services/Subscription/Academies.Subscription.Api/Dockerfile
+          - name: academic-api
+            context: .
+            dockerfile: src/Services/Academic/Academies.Academic.Api/Dockerfile
+          - name: finance-api
+            context: .
+            dockerfile: src/Services/Finance/Academies.Finance.Api/Dockerfile
+          - name: engagement-api
+            context: .
+            dockerfile: src/Services/Engagement/Academies.Engagement.Api/Dockerfile
+          - name: gateway
+            context: .
+            dockerfile: src/Gateway/Academies.Gateway/Dockerfile
+          - name: client
+            context: client
+            dockerfile: client/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ matrix.name }}:latest
+            ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

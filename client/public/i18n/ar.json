@@ -1,0 +1,409 @@
+{
+  "app": {
+    "name": "منصة الأكاديميات",
+    "switchLanguage": "English",
+    "menu": "القائمة"
+  },
+  "nav": {
+    "home": "الرئيسية",
+    "users": "المستخدمون",
+    "students": "الطلاب",
+    "staff": "المعلمون والمشرفون",
+    "groups": "المجموعات",
+    "courses": "الكورسات",
+    "sessions": "الحصص",
+    "assignments": "الواجبات",
+    "certificates": "الشهادات",
+    "payments": "خطط الدفع",
+    "paymentLogs": "سجل المدفوعات",
+    "pay": "أنظمة الأجر",
+    "salaries": "الرواتب",
+    "salaryLogs": "سجل الرواتب",
+    "expenses": "المصروفات",
+    "reports": "التقارير المالية",
+    "dashboard": "لوحة التحليلات",
+    "audit": "سجل التدقيق",
+    "subscription": "الاشتراك",
+    "parentPortal": "بوابة ولي الأمر",
+    "me": "حسابي",
+    "notifications": "الإشعارات"
+  },
+  "navSection": {
+    "platform": "المنصّة",
+    "academy": "الأكاديمية",
+    "learning": "التعليم",
+    "finance": "المالية",
+    "me": "حسابي"
+  },
+  "auth": {
+    "loginTitle": "تسجيل الدخول",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "togglePassword": "إظهار/إخفاء كلمة المرور",
+    "signIn": "دخول",
+    "logout": "تسجيل الخروج",
+    "loginFailed": "تعذّر تسجيل الدخول. تحقّق من البيانات وحاول مجددًا.",
+    "forgotPassword": "نسيت كلمة المرور؟",
+    "resetTitle": "استعادة كلمة المرور",
+    "resetHint": "أدخل بريدك وسنرسل لك رمزًا من 6 أرقام.",
+    "sendCode": "إرسال الرمز",
+    "codeSent": "إن كان البريد مسجّلًا فقد أُرسل إليه رمز صالح لمدة 30 دقيقة.",
+    "code": "رمز الاستعادة",
+    "newPassword": "كلمة المرور الجديدة",
+    "passwordRules": "8 أحرف على الأقل، بحرف كبير وصغير ورقم",
+    "resetPassword": "تعيين كلمة المرور",
+    "resetFailed": "تعذّر تعيين كلمة المرور.",
+    "backToLogin": "العودة لتسجيل الدخول"
+  },
+  "home": {
+    "welcome": "أهلًا {{name}}"
+  },
+  "roles": {
+    "SuperAdmin": "أدمن النظام",
+    "Admin": "مدير الأكاديمية",
+    "Manager": "مدير",
+    "Supervisor": "مشرف",
+    "Teacher": "معلم",
+    "Student": "طالب",
+    "Parent": "ولي أمر",
+    "Accountant": "محاسب",
+    "Staff": "موظف"
+  },
+  "common": {
+    "saved": "تم الحفظ",
+    "error": "حدث خطأ",
+    "close": "إغلاق",
+    "create": "إنشاء",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "edit": "تعديل",
+    "delete": "حذف",
+    "remove": "إزالة",
+    "add": "إضافة",
+    "search": "بحث",
+    "all": "الكل",
+    "status": "الحالة",
+    "name": "الاسم",
+    "fullName": "الاسم الكامل",
+    "address": "العنوان",
+    "created": "تاريخ الإنشاء",
+    "active": "نشط",
+    "inactive": "غير نشط",
+    "noData": "لا توجد بيانات",
+    "from": "من",
+    "to": "إلى",
+    "apply": "تطبيق",
+    "reason": "السبب",
+    "phone": "الجوال",
+    "description": "الوصف",
+    "title": "العنوان",
+    "type": "النوع",
+    "date": "التاريخ",
+    "time": "الوقت",
+    "notes": "ملاحظات",
+    "amount": "المبلغ",
+    "previous": "السابق",
+    "next": "التالي",
+    "back": "رجوع"
+  },
+  "status": {
+    "Active": "نشط",
+    "Suspended": "موقوف",
+    "Trial": "تجريبي",
+    "Expired": "منتهي",
+    "Graduated": "متخرج",
+    "Withdrawn": "منسحب",
+    "Scheduled": "مجدولة",
+    "Completed": "منفّذة",
+    "Cancelled": "ملغاة",
+    "Present": "حاضر",
+    "Late": "متأخر",
+    "Absent": "غائب",
+    "Due": "مستحقة",
+    "PartiallyPaid": "مدفوعة جزئيًا",
+    "Paid": "مدفوعة",
+    "Overdue": "متأخرة",
+    "Pending": "معلّقة"
+  },
+  "platform": {
+    "academies": "الأكاديميات",
+    "newAcademy": "أكاديمية جديدة",
+    "academyName": "اسم الأكاديمية",
+    "adminName": "اسم المدير",
+    "adminEmail": "بريد المدير",
+    "adminPassword": "كلمة مرور المدير",
+    "users": "المستخدمون",
+    "subscription": "الاشتراك",
+    "suspend": "تعطيل",
+    "activate": "تفعيل",
+    "trialEnds": "تنتهي التجربة",
+    "assignPlan": "تعيين الباقة",
+    "plan": "الباقة",
+    "endsOn": "ينتهي في",
+    "startAsTrial": "كفترة تجريبية",
+    "extendTrial": "تمديد التجربة",
+    "days": "أيام",
+    "extend": "تمديد",
+    "overrides": "حدود خاصة بالأكاديمية",
+    "limit": "الحد",
+    "planValue": "حد الباقة",
+    "override": "الحد الخاص",
+    "unlimitedHint": "القيمة ‎-1 تعني بلا حد",
+    "plans": "الباقات والأسعار",
+    "newPlan": "باقة جديدة",
+    "month": "شهر",
+    "trialDays": "أيام تجربة",
+    "code": "الرمز",
+    "monthlyPrice": "السعر الشهري",
+    "order": "الترتيب",
+    "limits": "الحدود",
+    "features": "المزايا",
+    "priceHistory": "سجل الأسعار"
+  },
+  "limits": {
+    "students": "الطلاب",
+    "teachers": "المعلمون",
+    "users": "المستخدمون"
+  },
+  "features": {
+    "online_sessions": "الحصص الأونلاين",
+    "certificates": "الشهادات",
+    "gamification": "النقاط والأوسمة",
+    "payment_gateway": "الدفع الإلكتروني",
+    "analytics": "لوحات التحليلات"
+  },
+  "users": {
+    "new": "مستخدم جديد",
+    "edit": "تعديل مستخدم",
+    "plan": "الباقة",
+    "roles": "الأدوار",
+    "role": "الدور",
+    "lastLogin": "آخر دخول",
+    "deactivate": "تعطيل",
+    "activate": "تفعيل"
+  },
+  "dashboard": {
+    "activeStudents": "الطلاب النشطون",
+    "teachers": "المعلمون",
+    "sessionsCompleted": "الحصص المنفّذة",
+    "scheduled": "مجدولة",
+    "attendanceRate": "نسبة الحضور",
+    "sessionsAndAttendance": "الحصص والحضور شهريًا",
+    "revenueVsCosts": "الإيرادات مقابل التكاليف",
+    "topTeachers": "أكثر المعلمين حصصًا",
+    "unavailable": "لوحة التحليلات غير متاحة في باقتك أو لدورك."
+  },
+  "finance": {
+    "revenue": "الإيرادات",
+    "net": "صافي الربح",
+    "outstanding": "مستحقات غير محصّلة",
+    "salaries": "الرواتب",
+    "expenses": "المصروفات",
+    "refunds": "المستردّ"
+  },
+  "audit": {
+    "service": "الخدمة",
+    "action": "العملية",
+    "when": "الوقت",
+    "who": "المستخدم",
+    "entity": "العنصر",
+    "data": "التفاصيل",
+    "system": "النظام"
+  },
+  "subscription": {
+    "available": "الباقات المتاحة",
+    "upgradeHint": "للترقية أو تعديل الحدود تواصل مع إدارة المنصّة."
+  },
+  "students": {
+    "hint": "يُضاف الطلاب من شاشة المستخدمين بدور «طالب»، ثم تُستكمل بياناتهم هنا.",
+    "level": "المستوى",
+    "parent": "ولي الأمر",
+    "enrolled": "تاريخ الالتحاق"
+  },
+  "staff": {
+    "teachers": "المعلمون",
+    "supervisors": "المشرفون",
+    "parents": "أولياء الأمور",
+    "specialization": "التخصص",
+    "bio": "نبذة",
+    "students": "الطلاب",
+    "assignStudents": "إسناد طلاب",
+    "assignTeachers": "إسناد معلمين",
+    "workSchedule": "أيام وشفت العمل",
+    "day": "اليوم",
+    "workingDay": "يوم عمل",
+    "shiftStart": "بداية الشفت",
+    "shiftEnd": "نهاية الشفت",
+    "children": "الأبناء",
+    "dayOff": "إجازة"
+  },
+  "days": {
+    "Saturday": "السبت",
+    "Sunday": "الأحد",
+    "Monday": "الإثنين",
+    "Tuesday": "الثلاثاء",
+    "Wednesday": "الأربعاء",
+    "Thursday": "الخميس",
+    "Friday": "الجمعة"
+  },
+  "groups": {
+    "new": "مجموعة جديدة"
+  },
+  "courses": {
+    "new": "كورس جديد",
+    "materials": "المواد"
+  },
+  "materialType": {
+    "Link": "رابط",
+    "Document": "ملف",
+    "Video": "فيديو"
+  },
+  "sessions": {
+    "new": "حصة جديدة",
+    "duration": "المدة (دقيقة)",
+    "offline": "حضوري",
+    "online": "أونلاين",
+    "location": "المكان",
+    "meetingUrl": "رابط الاجتماع",
+    "generateLink": "توليد رابط أونلاين",
+    "repeatWeeks": "تكرار أسبوعي (عدد الأسابيع)",
+    "thisWeek": "هذا الأسبوع",
+    "join": "انضمام",
+    "attendance": "الحضور والتقييم",
+    "complete": "تسجيل كمنفّذة",
+    "cancel": "إلغاء الحصة",
+    "none": "لا توجد حصص",
+    "rating": "التقييم",
+    "comment": "تعليق",
+    "noRoster": "لا يوجد طلاب في هذه الحصة",
+    "saveAttendance": "حفظ الحضور",
+    "saveFeedback": "حفظ التقييمات"
+  },
+  "assignments": {
+    "new": "واجب جديد",
+    "wholeCourse": "كل طلاب الكورس",
+    "due": "آخر موعد",
+    "maxScore": "الدرجة القصوى",
+    "myResult": "نتيجتي",
+    "submissions": "التسليمات",
+    "submitted": "تم التسليم",
+    "notSubmitted": "لم يُسلَّم",
+    "submit": "تسليم",
+    "feedback": "ملاحظات المعلم",
+    "answer": "الإجابة",
+    "attachment": "رابط مرفق",
+    "submittedAt": "وقت التسليم",
+    "score": "الدرجة",
+    "late": "متأخر",
+    "grade": "رصد الدرجة"
+  },
+  "certificates": {
+    "issue": "إصدار شهادة",
+    "number": "رقم الشهادة",
+    "issued": "تاريخ الإصدار"
+  },
+  "payments": {
+    "newPlan": "خطة دفع شهرية جديدة",
+    "monthlyAmount": "المبلغ الشهري",
+    "startDate": "تاريخ البداية",
+    "months": "الأشهر",
+    "dueDay": "يوم الاستحقاق",
+    "period": "الفترة",
+    "paid": "المدفوع",
+    "month": "الشهر",
+    "due": "الاستحقاق",
+    "monthN": "شهر {{n}}",
+    "record": "تسجيل دفعة",
+    "refund": "استرداد",
+    "method": "طريقة الدفع",
+    "reference": "المرجع",
+    "totalPaid": "إجمالي المدفوع",
+    "totalRefunded": "إجمالي المستردّ",
+    "action": "العملية",
+    "currency": "عملة الأكاديمية",
+    "currencyHint": "تُطبَّق على الخطط الجديدة؛ الخطط الحالية تحتفظ بعملتها."
+  },
+  "method": {
+    "Cash": "نقدًا",
+    "BankTransfer": "تحويل بنكي",
+    "Card": "بطاقة",
+    "Online": "دفع إلكتروني"
+  },
+  "paymentAction": {
+    "Created": "إنشاء",
+    "Paid": "سداد",
+    "PartiallyPaid": "سداد جزئي",
+    "Refunded": "استرداد",
+    "Cancelled": "إلغاء"
+  },
+  "pay": {
+    "hint": "المعلمون بالحصة (سعر لكل حصة منفّذة)، والمشرفون والموظفون براتب شهري ثابت. يسري كل تعديل من التاريخ المحدد.",
+    "payType": "نظام الأجر",
+    "effectiveFrom": "يسري من",
+    "PerSession": "بالحصة",
+    "MonthlyFixed": "شهري ثابت",
+    "ratePerSession": "سعر الحصة",
+    "monthlySalary": "الراتب الشهري",
+    "history": "السجل"
+  },
+  "salaries": {
+    "generate": "احتساب رواتب الشهر",
+    "result": "جديدة {{created}} · أُعيد احتسابها {{regenerated}} · دون تغيير {{unchanged}} · مصروفة لم تتغير {{skippedPaid}}",
+    "thisMonth": "رواتب الشهر",
+    "calculation": "الاحتساب",
+    "pay": "صرف",
+    "adjust": "تعديل موثّق",
+    "none": "لا رواتب لهذا الشهر بعد. اضغط «احتساب رواتب الشهر»."
+  },
+  "salaryAction": {
+    "Created": "إنشاء",
+    "Regenerated": "إعادة احتساب",
+    "Paid": "صرف",
+    "Adjusted": "تعديل"
+  },
+  "expenses": {
+    "category": "البند"
+  },
+  "student": {
+    "points": "نقاطي",
+    "upcoming": "حصصي القادمة",
+    "feedback": "آخر التقييمات",
+    "badges": "الأوسمة",
+    "pointsShort": "نقطة",
+    "leaderboard": "لوحة الصدارة"
+  },
+  "teacher": {
+    "students": "طلابي",
+    "completedThisMonth": "حصص منفّذة هذا الشهر",
+    "pending": "حصص بانتظار التأكيد",
+    "pendingHint": "انتهت ولم تُسجَّل كمنفّذة",
+    "upcoming": "حصص الأسبوع القادم"
+  },
+  "supervisor": {
+    "teachers": "المعلمون تحت إشرافي"
+  },
+  "badges": {
+    "BRONZE": "برونزي",
+    "SILVER": "فضي",
+    "GOLD": "ذهبي",
+    "PLATINUM": "بلاتيني"
+  },
+  "parent": {
+    "payments": "المدفوعات الشهرية",
+    "payOnline": "ادفع عبر PayPal",
+    "noChildren": "لا يوجد أبناء مرتبطون بحسابك بعد.",
+    "payment_success": "تم الدفع بنجاح عبر PayPal. شكرًا لك!",
+    "payment_pending": "تم استلام الدفع وهو قيد المراجعة لدى PayPal، وسيظهر عند اكتماله.",
+    "payment_failed": "لم تكتمل عملية الدفع. لم يُخصم أي مبلغ، حاول مرة أخرى.",
+    "payment_cancelled": "تم إلغاء الدفع.",
+    "chargeConfirm": "المبلغ المستحق {{amount}} {{currency}}. سيُخصم عبر PayPal ما يعادله: {{charged}} {{chargedCurrency}}. متابعة؟"
+  },
+  "notifications": {
+    "readAll": "تعليم الكل كمقروء",
+    "none": "لا توجد إشعارات"
+  },
+  "currency": {
+    "USD": "دولار أمريكي (USD)",
+    "EGP": "جنيه مصري (EGP)"
+  }
+}

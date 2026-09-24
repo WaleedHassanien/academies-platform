@@ -1,0 +1,225 @@
+@use '@angular/material' as mat;
+
+html {
+  color-scheme: light;
+  @include mat.theme(
+    (
+      color: (
+        primary: mat.$azure-palette,
+        tertiary: mat.$blue-palette,
+      ),
+      typography: Cairo,
+      density: 0,
+    )
+  );
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Cairo, Roboto, 'Helvetica Neue', sans-serif;
+  background: var(--mat-sys-surface-container-low);
+  color: var(--mat-sys-on-surface);
+}
+
+.app-root {
+  height: 100%;
+}
+
+mat-icon {
+  font-family: 'Material Symbols Outlined';
+}
+
+/* Centered card for the unauthenticated pages (login, reset). */
+.auth-page {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  box-sizing: border-box;
+
+  mat-card {
+    width: 100%;
+    max-width: 420px;
+  }
+
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+.form-error {
+  color: var(--mat-sys-error);
+  margin: 0 0 8px;
+}
+
+/* ---------- Page layout shared by the feature pages ---------- */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+
+  h1 {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+
+  mat-form-field {
+    min-width: 180px;
+  }
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-bottom: 16px;
+}
+
+.stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 0 12px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: start;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+mat-card.panel {
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 1.05rem;
+  margin: 16px 0 8px;
+}
+
+.muted {
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--mat-sys-on-surface-variant);
+}
+
+/* Plain, dense data table: simpler than mat-table for read-mostly lists. */
+.table-wrap {
+  overflow-x: auto;
+  background: var(--mat-sys-surface);
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 12px;
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+
+  th,
+  td {
+    padding: 10px 12px;
+    text-align: start;
+    border-bottom: 1px solid var(--mat-sys-outline-variant);
+    vertical-align: middle;
+  }
+
+  th {
+    font-weight: 600;
+    color: var(--mat-sys-on-surface-variant);
+    background: var(--mat-sys-surface-container);
+    white-space: nowrap;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  tr.selected td {
+    background: var(--mat-sys-secondary-container);
+  }
+
+  td.num {
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+    text-align: end;
+  }
+
+  td.actions {
+    white-space: nowrap;
+    text-align: end;
+  }
+}
+
+.status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: var(--mat-sys-surface-container-high);
+
+  &.ok,
+  &.Paid,
+  &.Active,
+  &.Completed,
+  &.Present {
+    background: #d9f2e1;
+    color: #145a32;
+  }
+
+  &.warn,
+  &.Due,
+  &.PartiallyPaid,
+  &.Pending,
+  &.Trial,
+  &.Late,
+  &.Scheduled {
+    background: #fff1cc;
+    color: #7a5200;
+  }
+
+  &.bad,
+  &.Overdue,
+  &.Suspended,
+  &.Cancelled,
+  &.Expired,
+  &.Absent {
+    background: #fde0e0;
+    color: #8a1c1c;
+  }
+}
+
+.ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}

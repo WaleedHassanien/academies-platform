@@ -1,0 +1,24 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.trx
+## Secrets / local
+.env
+**/keys/*.pem
+appsettings.*.local.json
+## Node / Angular
+node_modules/
+client/dist/
+client/.angular/
+## IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+## Claude Code worktrees
+.claude/

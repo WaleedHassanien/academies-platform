@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Academies.Engagement.Domain\Academies.Engagement.Domain.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\Academies.BuildingBlocks.Application\Academies.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Academies.Engagement.Tests" />
+    <InternalsVisibleTo Include="Academies.Engagement.Infrastructure" />
+  </ItemGroup>
+</Project>

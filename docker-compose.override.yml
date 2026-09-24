@@ -1,0 +1,23 @@
+# Dev host ports. Same numbers as `dotnet run`, so the Angular proxy and Scalar links work
+# either way. Stop any locally-running service before `docker compose up` to avoid clashes.
+services:
+  mysql:
+    ports: ["3306:3306"]
+  redis:
+    ports: ["6379:6379"]
+  rabbitmq:
+    ports: ["5672:5672", "15672:15672"]
+  identity-api:
+    ports: ["5101:8080"]
+  subscription-api:
+    ports: ["5102:8080"]
+  academic-api:
+    ports: ["5103:8080"]
+  finance-api:
+    ports: ["5104:8080"]
+  engagement-api:
+    ports: ["5105:8080"]
+  gateway:
+    ports: ["5000:8080"]
+  client:
+    ports: ["4200:80"]

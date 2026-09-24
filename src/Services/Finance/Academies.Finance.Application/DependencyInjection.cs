@@ -1,0 +1,25 @@
+using FluentValidation;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Academies.Finance.Application;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddFinanceApplication(this IServiceCollection services)
+    {
+        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly, includeInternalTypes: true);
+        services.AddScoped<FinanceAccess>();
+        services.AddScoped<IReportCache, ReportCache>();
+        services.AddScoped<IFinanceSettingsService, FinanceSettingsService>();
+        services.AddScoped<IPaymentPlanService, PaymentPlanService>();
+        services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IOnlinePaymentService, OnlinePaymentService>();
+        services.AddScoped<ICompensationService, CompensationService>();
+        services.AddScoped<ISalaryService, SalaryService>();
+        services.AddScoped<IExpenseService, ExpenseService>();
+        services.AddScoped<IReportService, ReportService>();
+        services.AddScoped<IPaymentReminderService, PaymentReminderService>();
+        services.AddScoped<IGuardianSync, GuardianSync>();
+        return services;
+    }
+}

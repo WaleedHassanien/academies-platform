@@ -1,0 +1,50 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/Academies.BuildingBlocks.Application/Academies.BuildingBlocks.Application.csproj" />
+    <Project Path="src/BuildingBlocks/Academies.BuildingBlocks.Domain/Academies.BuildingBlocks.Domain.csproj" />
+    <Project Path="src/BuildingBlocks/Academies.BuildingBlocks.Infrastructure/Academies.BuildingBlocks.Infrastructure.csproj" />
+    <Project Path="src/BuildingBlocks/Academies.Contracts/Academies.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/src/Gateway/">
+    <Project Path="src/Gateway/Academies.Gateway/Academies.Gateway.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/" />
+  <Folder Name="/src/Services/Academic/">
+    <Project Path="src/Services/Academic/Academies.Academic.Api/Academies.Academic.Api.csproj" />
+    <Project Path="src/Services/Academic/Academies.Academic.Application/Academies.Academic.Application.csproj" />
+    <Project Path="src/Services/Academic/Academies.Academic.Domain/Academies.Academic.Domain.csproj" />
+    <Project Path="src/Services/Academic/Academies.Academic.Infrastructure/Academies.Academic.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Engagement/">
+    <Project Path="src/Services/Engagement/Academies.Engagement.Api/Academies.Engagement.Api.csproj" />
+    <Project Path="src/Services/Engagement/Academies.Engagement.Application/Academies.Engagement.Application.csproj" />
+    <Project Path="src/Services/Engagement/Academies.Engagement.Domain/Academies.Engagement.Domain.csproj" />
+    <Project Path="src/Services/Engagement/Academies.Engagement.Infrastructure/Academies.Engagement.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Finance/">
+    <Project Path="src/Services/Finance/Academies.Finance.Api/Academies.Finance.Api.csproj" />
+    <Project Path="src/Services/Finance/Academies.Finance.Application/Academies.Finance.Application.csproj" />
+    <Project Path="src/Services/Finance/Academies.Finance.Domain/Academies.Finance.Domain.csproj" />
+    <Project Path="src/Services/Finance/Academies.Finance.Infrastructure/Academies.Finance.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Identity/">
+    <Project Path="src/Services/Identity/Academies.Identity.Api/Academies.Identity.Api.csproj" />
+    <Project Path="src/Services/Identity/Academies.Identity.Application/Academies.Identity.Application.csproj" />
+    <Project Path="src/Services/Identity/Academies.Identity.Domain/Academies.Identity.Domain.csproj" />
+    <Project Path="src/Services/Identity/Academies.Identity.Infrastructure/Academies.Identity.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Subscription/">
+    <Project Path="src/Services/Subscription/Academies.Subscription.Api/Academies.Subscription.Api.csproj" />
+    <Project Path="src/Services/Subscription/Academies.Subscription.Application/Academies.Subscription.Application.csproj" />
+    <Project Path="src/Services/Subscription/Academies.Subscription.Domain/Academies.Subscription.Domain.csproj" />
+    <Project Path="src/Services/Subscription/Academies.Subscription.Infrastructure/Academies.Subscription.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Academies.Academic.Tests/Academies.Academic.Tests.csproj" />
+    <Project Path="tests/Academies.BuildingBlocks.Tests/Academies.BuildingBlocks.Tests.csproj" />
+    <Project Path="tests/Academies.Finance.Tests/Academies.Finance.Tests.csproj" />
+    <Project Path="tests/Academies.Identity.Tests/Academies.Identity.Tests.csproj" />
+    <Project Path="tests/Academies.Subscription.Tests/Academies.Subscription.Tests.csproj" />
+  </Folder>
+</Solution>

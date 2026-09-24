@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Academies.Identity.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Academies.Identity.Application\Academies.Identity.Application.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\Academies.BuildingBlocks.Infrastructure\Academies.BuildingBlocks.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

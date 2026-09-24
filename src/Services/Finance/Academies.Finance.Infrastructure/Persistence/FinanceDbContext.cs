@@ -1,0 +1,143 @@
+using Academies.BuildingBlocks.Application.Abstractions;
+using Academies.BuildingBlocks.Domain;
+using Academies.BuildingBlocks.Infrastructure.Persistence;
+using Academies.Finance.Application;
+using Academies.Finance.Domain;
+using Microsoft.EntityFrameworkCore;
+
+namespace Academies.Finance.Infrastructure.Persistence;
+
+/// <summary>Maps only the Finance service's tables in the shared <c>academies</c> database.</summary>
+public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options, ICurrentUser currentUser)
+    : ServiceDbContext(options, currentUser), IFinanceDbContext
+{
+    protected override string ServiceName => FinanceServiceInfo.Name;
+    protected override bool HasPeopleDirectory => true;
+
+    public DbSet<Person> People => Set<Person>();
+
+    public DbSet<Compensation> Compensations => Set<Compensation>();
+    public DbSet<PaymentPlan> PaymentPlans => Set<PaymentPlan>();
+    public DbSet<StudentPayment> StudentPayments => Set<StudentPayment>();
+    public DbSet<PaymentLog> PaymentLogs => Set<PaymentLog>();
+    public DbSet<StudentGuardian> Guardians => Set<StudentGuardian>();
+    public DbSet<Salary> Salaries => Set<Salary>();
+    public DbSet<SalaryLog> SalaryLogs => Set<SalaryLog>();
+    public DbSet<Expense> Expenses => Set<Expense>();
+    public DbSet<OnlinePayment> OnlinePayments => Set<OnlinePayment>();
+    public DbSet<FinanceSettings> Settings => Set<FinanceSettings>();
+
+    protected override void OnModelCreating(ModelBuilder b)
+    {
+        base.OnModelCreating(b);
+
+        b.Entity<Compensation>(e =>
+        {
+            e.ToTable("Compensations");
+            e.Property(x => x.PayType).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Note).HasMaxLength(300);
+            e.HasIndex(x => new { x.UserId, x.EffectiveFrom });
+        });
+        b.Entity<PaymentPlan>(e =>
+        {
+            e.ToTable("PaymentPlans");
+            e.Property(x => x.MonthlyAmount).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.HasIndex(x => x.StudentUserId);
+        });
+        b.Entity<StudentPayment>(e =>
+        {
+            e.ToTable("StudentPayments");
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.PaidAmount).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Ignore(x => x.Remaining);
+            e.HasOne<PaymentPlan>().WithMany().HasForeignKey(x => x.PaymentPlanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.StudentUserId, x.MonthNumber });
+            e.HasIndex(x => new { x.Status, x.DueDate });
+        });
+        b.Entity<PaymentLog>(e =>
+        {
+            e.ToTable("PaymentLogs");
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.Action).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Method).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.PaidByRole).HasMaxLength(30);
+            e.Property(x => x.Reference).HasMaxLength(100);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.HasOne<StudentPayment>().WithMany().HasForeignKey(x => x.StudentPaymentId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.StudentUserId, x.MonthNumber });
+            e.HasIndex(x => x.ParentUserId);
+            e.HasIndex(x => x.CreatedOnUtc);
+        });
+        b.Entity<StudentGuardian>(e =>
+        {
+            e.ToTable("StudentGuardians");
+            e.HasIndex(x => x.StudentUserId);
+            e.HasIndex(x => x.ParentUserId);
+        });
+        b.Entity<Salary>(e =>
+        {
+            e.ToTable("Salaries");
+            e.Property(x => x.Role).HasMaxLength(30);
+            e.Property(x => x.PayType).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.RatePerSession).HasPrecision(12, 2);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.Ignore(x => x.MonthNumber);
+            e.HasIndex(x => new { x.Year, x.Month, x.UserId });
+        });
+        b.Entity<SalaryLog>(e =>
+        {
+            e.ToTable("SalaryLogs");
+            e.Property(x => x.Role).HasMaxLength(30);
+            e.Property(x => x.PayType).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Action).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.RatePerSession).HasPrecision(12, 2);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Note).HasMaxLength(600);
+            e.HasOne<Salary>().WithMany().HasForeignKey(x => x.SalaryId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => new { x.UserId, x.Year, x.Month });
+        });
+        b.Entity<Expense>(e =>
+        {
+            e.ToTable("Expenses");
+            e.Property(x => x.Category).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Reference).HasMaxLength(100);
+            e.HasIndex(x => x.SpentOn);
+        });
+        b.Entity<OnlinePayment>(e =>
+        {
+            e.ToTable("OnlinePayments");
+            e.Property(x => x.Provider).HasMaxLength(30);
+            e.Property(x => x.Reference).HasMaxLength(80);
+            e.Property(x => x.ProviderSessionId).HasMaxLength(200);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.ChargedAmount).HasPrecision(12, 2);
+            e.Property(x => x.ChargedCurrency).HasMaxLength(3);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.CheckoutUrl).HasMaxLength(1000);
+            e.HasIndex(x => x.Reference).IsUnique();
+            e.HasIndex(x => x.ProviderSessionId);
+        });
+        b.Entity<FinanceSettings>(e =>
+        {
+            e.ToTable("FinanceSettings");
+            e.Property(x => x.Currency).HasMaxLength(3);
+        });
+    }
+}
+
+internal sealed class FinanceDesignTimeFactory() : DesignTimeDbContextFactoryBase<FinanceDbContext>(FinanceServiceInfo.Name)
+{
+    protected override FinanceDbContext Create(DbContextOptions<FinanceDbContext> options, ICurrentUser currentUser) => new(options, currentUser);
+}

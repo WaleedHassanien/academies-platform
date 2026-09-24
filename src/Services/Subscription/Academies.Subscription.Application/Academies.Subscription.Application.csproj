@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Academies.Subscription.Domain\Academies.Subscription.Domain.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\Academies.BuildingBlocks.Application\Academies.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Academies.Subscription.Tests" />
+    <InternalsVisibleTo Include="Academies.Subscription.Infrastructure" />
+  </ItemGroup>
+</Project>
