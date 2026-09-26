@@ -89,6 +89,21 @@ export interface StudentDto {
   parentUserId: number | null;
   parentName: string | null;
   groups: string[];
+  /** IANA zone, e.g. "Asia/Riyadh". */
+  timeZone: string | null;
+  /** Own teachers plus the teachers of the student's groups. */
+  teachers: { userId: number; fullName: string }[];
+  /** Usual length of their one-to-one session. */
+  sessionMinutes: number;
+}
+
+/** One session from a student's point of view (GET students/{id}/sessions). */
+export interface StudentSessionDto {
+  session: SessionDto;
+  attendanceStatus: string | null;
+  attendanceNote: string | null;
+  rating: number | null;
+  comment: string | null;
 }
 
 export interface StaffProfileDto {
@@ -158,8 +173,173 @@ export interface SessionDto {
   type: 'Online' | 'Offline';
   meetingUrl: string | null;
   location: string | null;
-  status: 'Scheduled' | 'Completed' | 'Cancelled';
+  status: 'Scheduled' | 'Completed' | 'Cancelled' | 'Excused';
   notes: string | null;
+  /** One-to-one sessions only. */
+  studentUserId: number | null;
+  studentName: string | null;
+  makeupOfSessionId: number | null;
+  /** The one-to-one student's attendance. */
+  attendanceStatus: string | null;
+  /** Supervisor's call on an unexcused absence: counts (billed and paid) or not; null = undecided. */
+  absenceCounted: boolean | null;
+  excuse: SessionExcuseDto | null;
+  durationMinutes: number;
+}
+
+/** A personal link into a teacher's online room. */
+export interface JoinLinkDto {
+  url: string;
+  isModerator: boolean;
+  expiresAtUtc: string;
+}
+
+export type ExcuseResolution = 'Rescheduled' | 'CarriedOver' | 'NotCounted' | 'DeductedNextMonth';
+
+export interface SessionExcuseDto {
+  id: number;
+  sessionId: number;
+  studentUserId: number;
+  reason: string | null;
+  preferredStartsAtUtc: string | null;
+  status: 'Pending' | 'Resolved' | 'Rejected';
+  resolution: ExcuseResolution | null;
+  makeupSessionId: number | null;
+  resolutionNote: string | null;
+  createdOnUtc: string;
+}
+
+export interface ExcuseItemDto {
+  excuse: SessionExcuseDto;
+  session: SessionDto;
+  requestedByName: string | null;
+}
+
+export interface SessionCountsDto {
+  scheduled: number;
+  held: number;
+  absentCounted: number;
+  absentNotCounted: number;
+  absentPending: number;
+  excused: number;
+  cancelled: number;
+  heldMinutes: number;
+  counted: number;
+}
+
+export interface SessionReportRowDto {
+  userId: number;
+  fullName: string;
+  counts: SessionCountsDto;
+}
+
+export interface SessionReportDto {
+  fromUtc: string;
+  toUtc: string;
+  totals: SessionCountsDto;
+  byTeacher: SessionReportRowDto[];
+  byStudent: SessionReportRowDto[];
+  pendingExcuses: number;
+  pendingAbsences: number;
+}
+
+// ---------- Per-session billing and teacher payouts ----------
+
+export type BillingMode = 'Prepaid' | 'Postpaid';
+
+export interface TeacherRateDto {
+  teacherUserId: number;
+  teacherName: string | null;
+  studentUserId: number;
+  studentName: string | null;
+  ratePerSession: number;
+}
+
+export interface StudentBillingDto {
+  studentUserId: number;
+  mode: BillingMode;
+  pricePerSession: number;
+  sessionsPerMonth: number;
+  dueDay: number;
+  currency: string;
+  rates: TeacherRateDto[];
+}
+
+export interface BillingSummaryDto {
+  studentUserId: number;
+  mode: BillingMode;
+  pricePerSession: number;
+  sessionsPerMonth: number;
+  currency: string;
+  year: number;
+  month: number;
+  countedThisMonth: number;
+  carriedIn: number;
+  packageRemaining: number;
+  unbilledAmount: number;
+  outstanding: number;
+}
+
+export interface UnpaidSessionDto {
+  sessionId: number;
+  studentUserId: number;
+  studentName: string | null;
+  startsAtUtc: string;
+  durationMinutes: number;
+  outcome: string;
+  rate: number | null;
+}
+
+export interface UnpaidTeacherDto {
+  teacherUserId: number;
+  teacherName: string | null;
+  sessions: UnpaidSessionDto[];
+  total: number;
+  missingRates: number;
+  currency: string;
+}
+
+export interface PayoutLineDto {
+  sessionId: number;
+  studentUserId: number;
+  studentName: string | null;
+  sessionStartsAtUtc: string;
+  durationMinutes: number;
+  outcome: string;
+  rate: number;
+}
+
+export interface PayoutDto {
+  id: number;
+  teacherUserId: number;
+  teacherName: string | null;
+  kind: 'Interim' | 'MonthEnd';
+  year: number;
+  month: number;
+  sessionsCount: number;
+  amount: number;
+  currency: string;
+  status: 'Pending' | 'Paid';
+  createdOnUtc: string;
+  paidOnUtc: string | null;
+  reference: string | null;
+  note: string | null;
+  lines: PayoutLineDto[] | null;
+}
+
+export interface MyEarningsDto {
+  unpaid: UnpaidTeacherDto;
+  payouts: PayoutDto[];
+}
+
+export interface MonthCloseResultDto {
+  year: number;
+  month: number;
+  payouts: number;
+  paidSessions: number;
+  sessionsMissingRates: number;
+  invoicesCreated: number;
+  invoicesUpdated: number;
 }
 
 export interface RosterItemDto {

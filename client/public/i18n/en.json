@@ -2,7 +2,19 @@
   "app": {
     "name": "Academies Platform",
     "switchLanguage": "العربية",
-    "menu": "Menu"
+    "menu": "Menu",
+    "tagline": "Run your academy in one place",
+    "heroTitle": "Everything your academy needs, beautifully organised",
+    "heroText": "Students, sessions, attendance, payments and salaries: one clear workspace for every role.",
+    "feature1": "Scheduling and attendance in a few taps",
+    "feature2": "Payments, salaries and reports that add up",
+    "feature3": "Arabic and English, on any device",
+    "darkMode": "Dark mode",
+    "lightMode": "Light mode",
+    "collapseMenu": "Collapse menu",
+    "expandMenu": "Expand menu",
+    "account": "Account",
+    "backToTop": "Back to top"
   },
   "nav": {
     "home": "Home",
@@ -26,7 +38,9 @@
     "subscription": "Subscription",
     "parentPortal": "Parent portal",
     "me": "My account",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "requests": "Requests",
+    "payouts": "Teacher payouts"
   },
   "navSection": {
     "platform": "Platform",
@@ -53,7 +67,8 @@
     "passwordRules": "At least 8 characters, with upper and lower case letters and a digit",
     "resetPassword": "Set password",
     "resetFailed": "Couldn't reset the password.",
-    "backToLogin": "Back to sign in"
+    "backToLogin": "Back to sign in",
+    "loginSubtitle": "Welcome back. Sign in to continue."
   },
   "home": {
     "welcome": "Welcome, {{name}}"
@@ -123,7 +138,8 @@
     "PartiallyPaid": "Partially paid",
     "Paid": "Paid",
     "Overdue": "Overdue",
-    "Pending": "Pending"
+    "Pending": "Pending",
+    "Excused": "Excused"
   },
   "platform": {
     "academies": "Academies",
@@ -218,7 +234,33 @@
     "hint": "Add students on the Users screen with the Student role, then complete their details here.",
     "level": "Level",
     "parent": "Parent",
-    "enrolled": "Enrolled"
+    "enrolled": "Enrolled",
+    "view": "View",
+    "teachers": "Teachers",
+    "teachersHint": "The student's own teachers and their groups' teachers",
+    "noTeachers": "No teacher assigned yet",
+    "timeZones": "Time zones",
+    "timeZonesHint": "Session times are shown in both",
+    "timeZone": "Student's time zone",
+    "egyptTime": "Egypt time",
+    "studentTime": "Student's time",
+    "notSet": "Not set",
+    "sameAsEgypt": "Same time as Egypt",
+    "aheadOfEgypt": "The student is {{hours}} h ahead of Egypt",
+    "behindEgypt": "The student is {{hours}} h behind Egypt",
+    "totalSessions": "Sessions so far",
+    "attended": "Attended",
+    "upcoming": "Upcoming",
+    "history": "Past sessions",
+    "session": "Session",
+    "notRecorded": "Not recorded",
+    "nextSession": "NEXT SESSION",
+    "startsIn": "Starts in",
+    "days": "days",
+    "hours": "hours",
+    "minutes": "min",
+    "seconds": "sec",
+    "sessionMinutes": "Session length (min)"
   },
   "staff": {
     "teachers": "Teachers",
@@ -277,7 +319,10 @@
     "comment": "Comment",
     "noRoster": "No students in this session",
     "saveAttendance": "Save attendance",
-    "saveFeedback": "Save feedback"
+    "saveFeedback": "Save feedback",
+    "student": "Student (one-to-one)",
+    "groupSession": "— Group session —",
+    "studentHint": "Fills in the student's teacher and session length"
   },
   "assignments": {
     "new": "New assignment",
@@ -405,5 +450,149 @@
   "currency": {
     "USD": "US dollar (USD)",
     "EGP": "Egyptian pound (EGP)"
+  },
+  "palette": {
+    "title": "Quick search",
+    "placeholder": "Search or jump to…",
+    "none": "No matches",
+    "move": "to move",
+    "open": "to open",
+    "actions": "Actions"
+  },
+  "outcome": {
+    "scheduled": "Scheduled",
+    "held": "Held",
+    "late": "Held (late)",
+    "absentCounted": "Absent · counted",
+    "absentNotCounted": "Absent · not counted",
+    "absentPending": "Absent · awaiting decision",
+    "excusePending": "Excused · awaiting decision",
+    "excuse_Rescheduled": "Excused · rescheduled",
+    "excuse_CarriedOver": "Excused · moved to next month",
+    "excuse_NotCounted": "Excused · not counted",
+    "excuse_DeductedNextMonth": "Excused · deducted next month",
+    "cancelled": "Cancelled",
+    "makeup": "Make-up session",
+    "excused": "Excused"
+  },
+  "excuse": {
+    "action": "Excuse",
+    "title": "Excuse from this session",
+    "reason": "Reason",
+    "preferredTime": "Preferred new time",
+    "preferredHint": "Optional: a time that suits you for a make-up session",
+    "send": "Send excuse",
+    "sent": "Excuse sent. Your supervisor will confirm what happens next.",
+    "resolveTitle": "Decide on the excuse",
+    "makeupTime": "Make-up session time",
+    "opt_Rescheduled": "Reschedule",
+    "hint_Rescheduled": "Book a make-up session at another time; it is billed and paid instead",
+    "opt_CarriedOver": "Move to next month",
+    "hint_CarriedOver": "A prepaid student gets one extra session in next month’s package",
+    "opt_NotCounted": "Don't count",
+    "hint_NotCounted": "Not billed to the student and not paid to the teacher",
+    "opt_DeductedNextMonth": "Deduct from next month",
+    "hint_DeductedNextMonth": "For prepaid students: next month’s invoice is reduced by this session’s price",
+    "opt_Reject": "Reject the excuse",
+    "hint_Reject": "The session goes back on the timetable"
+  },
+  "mySessions": {
+    "title": "My sessions",
+    "teamTitle": "Sessions of my teachers",
+    "week": "This week",
+    "month": "This month",
+    "thisMonth": "This month",
+    "hours": "Hours",
+    "absences": "Absences",
+    "excused": "Excused",
+    "needsDecision": "Need your decision",
+    "min": "min",
+    "byTeacher": "By teacher",
+    "byStudent": "By student"
+  },
+  "requests": {
+    "hint": "Students' excuses and unexcused absences waiting for a decision.",
+    "excuses": "Excuses",
+    "pending": "Pending",
+    "by": "by",
+    "decide": "Decide",
+    "noExcuses": "No excuses waiting",
+    "absences": "Unexcused absences",
+    "absencesHint": "Does the session count? Counted sessions are billed to the student and paid to the teacher.",
+    "counts": "Counts",
+    "notCounted": "Doesn't count",
+    "noAbsences": "No absences waiting"
+  },
+  "payouts": {
+    "month": "Month",
+    "invoices": "Student invoices",
+    "closeMonth": "Close month now",
+    "hint": "Month-end payouts are built automatically at 11 PM (Egypt time) on the last day of the month. Sessions paid earlier never appear again.",
+    "owedNow": "Owed now",
+    "unpaidSessions": "Unpaid sessions",
+    "awaitingTransfer": "Awaiting transfer",
+    "paidThisMonth": "Paid this month",
+    "owed": "Owed to teachers",
+    "sessions": "sessions",
+    "noRate": "without a rate",
+    "rate": "Rate per session",
+    "setRate": "Set rate",
+    "reference": "Transfer reference",
+    "selected": "Selected",
+    "payNow": "Send payment",
+    "nothingOwed": "Nothing owed right now",
+    "history": "Payouts",
+    "kind_Interim": "Mid-month",
+    "kind_MonthEnd": "Month end",
+    "status_Pending": "Awaiting transfer",
+    "status_Paid": "Transferred",
+    "paidOn": "Transferred on",
+    "markPaid": "Mark transferred",
+    "rates": "Teacher rates",
+    "sent": "Payment recorded. Those sessions are settled.",
+    "referencePrompt": "Transfer reference (optional)",
+    "closed": "Month closed: {{payouts}} payouts, {{invoices}} invoices. Sessions without a rate: {{missing}}.",
+    "invoicesDone": "Invoices: {{created}} new, {{updated}} updated.",
+    "editRateHint": "Set the rate in the form above, then save."
+  },
+  "earnings": {
+    "owed": "Earned, not yet paid",
+    "lastPayout": "Last payout",
+    "title": "My payouts",
+    "none": "No payouts yet"
+  },
+  "billing": {
+    "title": "Billing",
+    "mode": "Payment mode",
+    "mode_Prepaid": "Prepaid (monthly package)",
+    "mode_Postpaid": "Postpaid (after the month)",
+    "session": "session",
+    "packageUse": "Package this month",
+    "left": "left",
+    "carried": "carried in",
+    "countedThisMonth": "sessions this month",
+    "soFar": "so far",
+    "balance": "Balance due",
+    "notSet": "No price set yet.",
+    "hint_Prepaid": "Invoiced before each month for the package",
+    "hint_Postpaid": "Invoiced after the month for the sessions that counted",
+    "price": "Price per session",
+    "sessionsPerMonth": "Sessions per month",
+    "teacherRates": "Teacher's rate per session",
+    "edit": "Price & rates"
+  },
+  "room": {
+    "myRoom": "My room",
+    "link": "Room link",
+    "shareTitle": "{{name}}'s room link",
+    "shareHint": "The teacher's own permanent room. The link opens it as the teacher (moderator) with no login; send it to them only.",
+    "validFor": "Link works for",
+    "days": "{{n}} days",
+    "expires": "Works until",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy; select the link and copy it.",
+    "whatsapp": "Send on WhatsApp",
+    "message": "Assalamu alaikum {{name}}, this is your personal room link for your online sessions:"
   }
 }

@@ -9,6 +9,7 @@ using Academies.Finance.Application;
 using Academies.Finance.Infrastructure.Payments;
 using Academies.Finance.Infrastructure.Persistence;
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -50,6 +51,7 @@ public static class DependencyInjection
         if (configuration.GetValue("Jobs:Enabled", true))
         {
             services.AddHostedService<PaymentReminderJob>();
+            services.AddHostedService<MonthCloseJob>();
         }
 
         return services;
@@ -61,6 +63,16 @@ internal sealed class AcademicClient(HttpClient http) : IAcademicClient
     public Task<IReadOnlyList<TeacherSessionCount>> CompletedSessionCountsAsync(long academyId, int year, int month, CancellationToken ct = default) =>
         http.GetDataAsync<IReadOnlyList<TeacherSessionCount>>(
             $"internal/sessions/completed-counts?academyId={academyId}&year={year}&month={month}", ct);
+
+    public Task<IReadOnlyList<LedgerSession>> LedgerAsync(
+        long academyId, DateTime fromUtc, DateTime toUtc, long? teacherUserId = null, long? studentUserId = null, CancellationToken ct = default)
+    {
+        static string Utc(DateTime d) => Uri.EscapeDataString(DateTime.SpecifyKind(d, DateTimeKind.Utc).ToString("O"));
+        var url = $"internal/sessions/ledger?academyId={academyId}&fromUtc={Utc(fromUtc)}&toUtc={Utc(toUtc)}"
+                  + (teacherUserId is { } t ? $"&teacherUserId={t}" : "")
+                  + (studentUserId is { } s ? $"&studentUserId={s}" : "");
+        return http.GetDataAsync<IReadOnlyList<LedgerSession>>(url, ct);
+    }
 }
 
 /// <summary>Keeps student→parent links for payment visibility (US-030).</summary>
@@ -71,6 +83,47 @@ internal sealed class StudentParentChangedConsumer(IGuardianSync guardians) : IC
         var m = context.Message;
         using var _ = CurrentUserOverride.Begin(SystemCurrentUser.ForAcademy(m.AcademyId));
         await guardians.SetAsync(m.AcademyId, m.StudentUserId, m.ParentUserId, context.CancellationToken);
+    }
+}
+
+/// <summary>
+/// Every 10 minutes: in the last hour of the month (Egypt time) each academy's month is closed —
+/// a pending payout per teacher for their unpaid sessions and the students' invoices. The admin
+/// then confirms each transfer. A close missed while the service was down runs in the first days after.
+/// </summary>
+internal sealed class MonthCloseJob(IServiceScopeFactory scopes, ILogger<MonthCloseJob> logger) : RecurringJob(scopes, logger)
+{
+    protected override TimeSpan Interval => TimeSpan.FromMinutes(10);
+
+    protected override async Task RunAsync(IServiceProvider services, CancellationToken ct)
+    {
+        List<long> academies;
+        using (CurrentUserOverride.Begin(SystemCurrentUser.Platform))
+        {
+            var db = services.GetRequiredService<IFinanceDbContext>();
+            academies = await db.People.Select(p => p.AcademyId).Distinct().ToListAsync(ct);
+        }
+
+        foreach (var academyId in academies)
+        {
+            try
+            {
+                // A fresh scope per academy so each gets its own tenant-filtered DbContext.
+                await using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                using var _ = CurrentUserOverride.Begin(SystemCurrentUser.ForAcademy(academyId));
+                var result = await scope.ServiceProvider.GetRequiredService<IMonthCloseService>().CloseIfDueAsync(ct);
+                if (result is not null)
+                {
+                    logger.LogInformation(
+                        "Closed {Year}-{Month:00} for academy {AcademyId}: {Payouts} payouts, {Invoices} new invoices",
+                        result.Year, result.Month, academyId, result.Payouts, result.InvoicesCreated);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Month close failed for academy {AcademyId}", academyId);
+            }
+        }
     }
 }
 

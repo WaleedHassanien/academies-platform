@@ -108,7 +108,6 @@ public interface ISalaryService
 
 internal sealed class SalaryService(
     IFinanceDbContext db,
-    IAcademicClient academic,
     FinanceAccess access,
     IReportCache reports,
     IEventPublisher events,
@@ -116,9 +115,10 @@ internal sealed class SalaryService(
     TimeProvider clock) : ISalaryService
 {
     /// <summary>
-    /// Builds the month's salaries (US-032). Fixed: the monthly amount. Per session: completed
-    /// sessions × rate. Months not yet paid are recalculated; paid months change only through a
-    /// documented adjustment.
+    /// Builds the month's fixed salaries (US-032) for supervisors and staff. Teachers paid per
+    /// session are not here: they are paid through teacher payouts, session by session
+    /// (<see cref="ITeacherPayoutService"/>). Months not yet paid are recalculated; paid months
+    /// change only through a documented adjustment.
     /// </summary>
     public async Task<GenerateResultDto> GenerateAsync(int year, int month, CancellationToken ct = default)
     {
@@ -126,12 +126,9 @@ internal sealed class SalaryService(
         var settings = await db.Compensations.AsNoTracking().Where(c => c.EffectiveFrom <= monthEnd).ToListAsync(ct);
         var inForce = settings.GroupBy(c => c.UserId)
             .Select(g => g.OrderByDescending(c => c.EffectiveFrom).ThenByDescending(c => c.Id).First())
+            .Where(c => c.PayType == PayType.MonthlyFixed)
             .ToList();
 
-        var needsSessions = inForce.Any(c => c.PayType == PayType.PerSession);
-        var sessions = needsSessions
-            ? (await academic.CompletedSessionCountsAsync(access.AcademyId, year, month, ct)).ToDictionary(s => s.TeacherUserId, s => s.CompletedSessions)
-            : [];
         var people = await db.People.Where(p => inForce.Select(c => c.UserId).Contains(p.UserId)).ToDictionaryAsync(p => p.UserId, ct);
         var existing = await db.Salaries.Where(s => s.Year == year && s.Month == month).ToDictionaryAsync(s => s.UserId, ct);
 
@@ -146,9 +143,9 @@ internal sealed class SalaryService(
                 continue;
             }
 
-            var count = setting.PayType == PayType.PerSession ? sessions.GetValueOrDefault(setting.UserId) : (int?)null;
-            var amount = SalaryCalculator.Calculate(setting.PayType, setting.Amount, count ?? 0);
-            var role = setting.PayType == PayType.PerSession ? Roles.Teacher : person.Roles.Split(',').FirstOrDefault(r => r != Roles.Teacher) ?? Roles.Staff;
+            int? count = null;
+            var amount = SalaryCalculator.Calculate(setting.PayType, setting.Amount, 0);
+            var role = person.Roles.Split(',').FirstOrDefault(r => r != Roles.Teacher) ?? Roles.Staff;
 
             if (existing.TryGetValue(setting.UserId, out var salary))
             {
@@ -395,10 +392,15 @@ internal sealed class ReportService(
                         && (l.Action == PaymentAction.Paid || l.Action == PaymentAction.PartiallyPaid || l.Action == PaymentAction.Refunded))
             .Select(l => new { l.Action, l.Amount, l.CreatedOnUtc })
             .ToListAsync(ct);
-        var salaries = await db.Salaries.AsNoTracking()
+        var fixedSalaries = await db.Salaries.AsNoTracking()
             .Where(s => s.Status == SalaryStatus.Paid && s.PaidOnUtc >= fromUtc && s.PaidOnUtc < toUtc)
             .Select(s => new { s.Amount, PaidOn = s.PaidOnUtc!.Value })
             .ToListAsync(ct);
+        var teacherPayouts = await db.Payouts.AsNoTracking()
+            .Where(p => p.Status == PayoutStatus.Paid && p.PaidOnUtc >= fromUtc && p.PaidOnUtc < toUtc)
+            .Select(p => new { p.Amount, PaidOn = p.PaidOnUtc!.Value })
+            .ToListAsync(ct);
+        var salaries = fixedSalaries.Concat(teacherPayouts).ToList();
         var expenses = await db.Expenses.AsNoTracking()
             .Where(e => e.SpentOn >= from && e.SpentOn <= to)
             .Select(e => new { e.Amount, e.SpentOn, e.Category })

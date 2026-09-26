@@ -4,9 +4,11 @@ import { TranslateService } from '@ngx-translate/core';
 import { PagedResult } from '../../core/api/api.models';
 import { Api, ApiService } from '../../core/api/api.service';
 import {
-  CheckoutDto, LeaderboardEntry, MyOverviewDto, NotificationDto, SalaryLogDto, SessionDto, StudentOverviewDto, StudentPaymentsDto,
+  CheckoutDto, LeaderboardEntry, MyEarningsDto, MyOverviewDto, NotificationDto, SalaryLogDto, SessionDto, StudentOverviewDto, StudentPaymentsDto,
   StudentPointsDto, WorkDayDto,
 } from '../../core/api/models';
+import { BillingCard } from '../../shared/billing-card';
+import { MySessions, SessionActions } from '../../shared/sessions-kit';
 import { AuthService } from '../../core/auth/auth.service';
 import { Permissions, Roles } from '../../core/auth/permissions';
 import { LanguageService } from '../../core/i18n/language.service';
@@ -26,7 +28,7 @@ import { Stat } from '../../shared/ui';
             <td>{{ s.startsAtUtc | date: 'EEE d MMM, HH:mm' }}</td>
             <td><b>{{ s.title }}</b><div class="muted">{{ s.courseName }} · {{ s.teacherName }}</div></td>
             <td>
-              @if (s.meetingUrl) { <a mat-button [href]="s.meetingUrl" target="_blank" rel="noopener"><mat-icon>videocam</mat-icon>{{ 'sessions.join' | translate }}</a> }
+              @if (s.meetingUrl && s.status === 'Scheduled') { <button mat-button (click)="actions.join(s)"><mat-icon>videocam</mat-icon>{{ 'sessions.join' | translate }}</button> }
               @else { {{ s.location }} }
             </td>
           </tr>
@@ -39,6 +41,7 @@ import { Stat } from '../../shared/ui';
 })
 export class SessionList {
   readonly sessions = input.required<SessionDto[]>();
+  protected readonly actions = inject(SessionActions);
 }
 
 /** A student's summary card: attendance, points, next sessions, latest feedback (US-028, US-040). */
@@ -48,9 +51,9 @@ export class SessionList {
   template: `
     @let s = student();
     <div class="stats">
-      <app-stat [label]="'dashboard.attendanceRate' | translate" [value]="s.attendance.rate + '%'"
+      <app-stat icon="how_to_reg" [label]="'dashboard.attendanceRate' | translate" [value]="s.attendance.rate + '%'"
                 [hint]="('status.Present' | translate) + ' ' + s.attendance.present + ' · ' + ('status.Late' | translate) + ' ' + s.attendance.late + ' · ' + ('status.Absent' | translate) + ' ' + s.attendance.absent" />
-      <app-stat [label]="'student.points' | translate" [value]="s.points" />
+      <app-stat icon="stars" [label]="'student.points' | translate" [value]="s.points" />
     </div>
     <h3 class="section-title">{{ 'student.upcoming' | translate }}</h3>
     <div class="table-wrap"><app-session-list [sessions]="s.upcoming" /></div>
@@ -74,72 +77,133 @@ export class StudentCard {
   }
 }
 
-/** Teacher: my students and my week (US-028). */
+/** Teacher: my sessions this week or month, my students, and what I've earned (US-028). */
 @Component({
   selector: 'app-teacher-home',
-  imports: [PAGE_IMPORTS, Stat, SessionList],
+  imports: [PAGE_IMPORTS, Stat, MySessions],
   template: `
-    <div class="page-header"><h1>{{ 'home.welcome' | translate: { name: auth.user()?.fullName } }}</h1></div>
+    <div class="page-header">
+      <h1>{{ 'home.welcome' | translate: { name: auth.user()?.fullName } }}</h1>
+      <div class="toolbar">
+        <button mat-flat-button (click)="actions.openMyRoom()"><mat-icon>video_call</mat-icon>{{ 'room.myRoom' | translate }}</button>
+        <a mat-stroked-button routerLink="/sessions"><mat-icon>calendar_month</mat-icon>{{ 'nav.sessions' | translate }}</a>
+      </div>
+    </div>
+
     @if (overview()?.teacher; as t) {
       <div class="stats">
-        <app-stat [label]="'teacher.students' | translate" [value]="t.students.length" />
-        <app-stat [label]="'teacher.completedThisMonth' | translate" [value]="t.completedThisMonth" />
-        <app-stat [label]="'teacher.pending' | translate" [value]="t.pendingToComplete" [hint]="'teacher.pendingHint' | translate" />
+        <app-stat icon="groups" [label]="'teacher.students' | translate" [value]="t.students.length" />
+        <app-stat icon="hourglass_top" [label]="'teacher.pending' | translate" [value]="t.pendingToComplete" [hint]="'teacher.pendingHint' | translate" />
+        @if (earnings(); as e) {
+          <app-stat icon="account_balance_wallet" [label]="'earnings.owed' | translate" [value]="(e.unpaid.total | number: '1.0-2') + ' ' + e.unpaid.currency"
+                    [hint]="e.unpaid.sessions.length + ' ' + ('payouts.sessions' | translate)" />
+          @if (e.payouts[0]; as last) {
+            <app-stat icon="paid" [label]="'earnings.lastPayout' | translate" [value]="(last.amount | number: '1.0-2') + ' ' + last.currency"
+                      [hint]="(last.paidOnUtc | utcDate: 'd MMM') ?? ('payouts.status_Pending' | translate)" />
+          }
+        }
       </div>
+
       <div class="grid">
         <mat-card appearance="outlined">
-          <mat-card-header><mat-card-title>{{ 'teacher.upcoming' | translate }}</mat-card-title></mat-card-header>
-          <mat-card-content><app-session-list [sessions]="t.upcoming" /></mat-card-content>
-          <mat-card-actions><a mat-button routerLink="/sessions">{{ 'nav.sessions' | translate }}</a></mat-card-actions>
-        </mat-card>
-        <mat-card appearance="outlined">
           <mat-card-header><mat-card-title>{{ 'teacher.students' | translate }}</mat-card-title></mat-card-header>
-          <mat-card-content><mat-chip-set>@for (s of t.students; track s.userId) { <mat-chip>{{ s.fullName }}</mat-chip> }</mat-chip-set></mat-card-content>
+          <mat-card-content>
+            <div class="people">
+              @for (s of t.students; track s.userId) {
+                <a class="person" [routerLink]="['/students', s.userId]"><span class="avatar">{{ initials(s.fullName) }}</span>{{ s.fullName }}</a>
+              } @empty { <p class="muted">{{ 'common.noData' | translate }}</p> }
+            </div>
+          </mat-card-content>
         </mat-card>
+        @if (earnings(); as e) {
+          <mat-card appearance="outlined">
+            <mat-card-header><mat-card-title>{{ 'earnings.title' | translate }}</mat-card-title></mat-card-header>
+            <mat-card-content>
+              <table class="data-table">
+                <tbody>
+                  @for (p of e.payouts.slice(0, 5); track p.id) {
+                    <tr>
+                      <td>{{ 'payouts.kind_' + p.kind | translate }} · {{ p.month }}/{{ p.year }}</td>
+                      <td class="num">{{ p.sessionsCount }} {{ 'payouts.sessions' | translate }}</td>
+                      <td class="num">{{ p.amount | number: '1.0-2' }} {{ p.currency }}</td>
+                      <td><span class="status" [class.ok]="p.status === 'Paid'" [class.warn]="p.status === 'Pending'">{{ 'payouts.status_' + p.status | translate }}</span></td>
+                    </tr>
+                  } @empty { <tr><td class="empty">{{ 'earnings.none' | translate }}</td></tr> }
+                </tbody>
+              </table>
+            </mat-card-content>
+          </mat-card>
+        }
       </div>
     }
+
+    <h2 class="block-title">{{ 'mySessions.title' | translate }}</h2>
+    <app-my-sessions [showTeacher]="false" breakdown="student" />
+  `,
+  styles: `
+    .people { display: flex; flex-wrap: wrap; gap: 8px; }
+    .person { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border-radius: 999px; text-decoration: none; color: inherit;
+      background: var(--app-surface-2); border: 1px solid var(--app-border); transition: border-color 0.15s, transform 0.15s; }
+    .person:hover { border-color: var(--mat-sys-primary); transform: translateY(-1px); }
+    .avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #fff; font-size: 0.7rem; font-weight: 700; background: var(--app-gradient); }
+    .block-title { margin: 8px 0 16px; font-size: 1.2rem; }
   `,
 })
 export class TeacherHomePage implements OnInit {
   private readonly api = inject(ApiService);
+  protected readonly actions = inject(SessionActions);
   protected readonly auth = inject(AuthService);
   protected readonly overview = signal<MyOverviewDto | null>(null);
+  protected readonly earnings = signal<MyEarningsDto | null>(null);
 
   ngOnInit(): void {
     this.api.get<MyOverviewDto>(`${Api.academic}/me/overview`).subscribe((o) => this.overview.set(o));
+    this.api.get<MyEarningsDto>(`${Api.finance}/me/earnings`).subscribe({ next: (e) => this.earnings.set(e), error: () => this.earnings.set(null) });
+  }
+
+  protected initials(name: string): string {
+    return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
   }
 }
 
-/** Supervisor: my teachers, their students and sessions, and my shift (US-021, US-028). */
+/** Supervisor: the teachers I follow and their students, a session report per teacher and student, and my shift (US-021, US-028). */
 @Component({
   selector: 'app-supervisor-home',
-  imports: [PAGE_IMPORTS, SessionList],
+  imports: [PAGE_IMPORTS, MySessions],
   template: `
     <div class="page-header">
       <h1>{{ 'home.welcome' | translate: { name: auth.user()?.fullName } }}</h1>
-      <a mat-stroked-button routerLink="/dashboard"><mat-icon>insights</mat-icon>{{ 'nav.dashboard' | translate }}</a>
+      <div class="toolbar">
+        <a mat-flat-button routerLink="/requests"><mat-icon>pending_actions</mat-icon>{{ 'nav.requests' | translate }}</a>
+        <a mat-stroked-button routerLink="/dashboard"><mat-icon>insights</mat-icon>{{ 'nav.dashboard' | translate }}</a>
+      </div>
     </div>
     @if (overview()?.supervisor; as s) {
-      <div class="grid">
-        <mat-card appearance="outlined">
-          <mat-card-header><mat-card-title>{{ 'supervisor.teachers' | translate }}</mat-card-title></mat-card-header>
-          <mat-card-content>
-            <table class="data-table">
-              <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'teacher.students' | translate }}</th><th>{{ 'teacher.completedThisMonth' | translate }}</th></tr></thead>
-              <tbody>
-                @for (t of s.teachers; track t.userId) { <tr><td>{{ t.fullName }}</td><td class="num">{{ t.students }}</td><td class="num">{{ t.completedThisMonth }}</td></tr> }
-                @empty { <tr><td colspan="3" class="empty">{{ 'common.noData' | translate }}</td></tr> }
-              </tbody>
-            </table>
-          </mat-card-content>
-        </mat-card>
-        <mat-card appearance="outlined">
-          <mat-card-header><mat-card-title>{{ 'teacher.upcoming' | translate }}</mat-card-title></mat-card-header>
-          <mat-card-content><app-session-list [sessions]="s.upcoming" /></mat-card-content>
-        </mat-card>
-      </div>
+      <mat-card appearance="outlined" class="panel">
+        <mat-card-header><mat-card-title>{{ 'supervisor.teachers' | translate }}</mat-card-title></mat-card-header>
+        <mat-card-content>
+          <table class="data-table">
+            <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'teacher.students' | translate }}</th><th>{{ 'teacher.completedThisMonth' | translate }}</th><th></th></tr></thead>
+            <tbody>
+              @for (t of s.teachers; track t.userId) {
+                <tr>
+                  <td>{{ t.fullName }}</td><td class="num">{{ t.students }}</td><td class="num">{{ t.completedThisMonth }}</td>
+                  <td class="actions">
+                    <button mat-stroked-button (click)="actions.shareTeacherRoom(t)"><mat-icon>link</mat-icon>{{ 'room.link' | translate }}</button>
+                  </td>
+                </tr>
+              }
+              @empty { <tr><td colspan="4" class="empty">{{ 'common.noData' | translate }}</td></tr> }
+            </tbody>
+          </table>
+        </mat-card-content>
+      </mat-card>
     }
-    <mat-card appearance="outlined">
+
+    <h2 class="block-title">{{ 'mySessions.teamTitle' | translate }}</h2>
+    <app-my-sessions breakdown="both" [showPending]="true" />
+
+    <mat-card appearance="outlined" class="shift">
       <mat-card-header><mat-card-title>{{ 'staff.workSchedule' | translate }}</mat-card-title></mat-card-header>
       <mat-card-content>
         <table class="data-table">
@@ -155,9 +219,14 @@ export class TeacherHomePage implements OnInit {
       </mat-card-content>
     </mat-card>
   `,
+  styles: `
+    .block-title { margin: 8px 0 16px; font-size: 1.2rem; }
+    .shift { margin-top: 24px; }
+  `,
 })
 export class SupervisorHomePage implements OnInit {
   private readonly api = inject(ApiService);
+  protected readonly actions = inject(SessionActions);
   protected readonly auth = inject(AuthService);
   protected readonly overview = signal<MyOverviewDto | null>(null);
   protected readonly schedule = signal<WorkDayDto[]>([]);
@@ -168,14 +237,31 @@ export class SupervisorHomePage implements OnInit {
   }
 }
 
-/** Student: my sessions, feedback, points and badges, leaderboard, and payments (US-028, US-042). */
+/** Student: this week's (or month's) sessions with excuses, my package or bill, feedback, points and badges (US-028, US-042). */
 @Component({
   selector: 'app-student-home',
-  imports: [PAGE_IMPORTS, StudentCard],
+  imports: [PAGE_IMPORTS, MySessions, BillingCard],
   template: `
     <div class="page-header"><h1>{{ 'home.welcome' | translate: { name: auth.user()?.fullName } }}</h1></div>
-    @if (overview()?.student; as s) { <app-student-card [student]="s" /> }
-    <div class="grid" style="margin-top: 16px">
+
+    <app-my-sessions [showStudent]="false" [canExcuse]="true" (changed)="billing.reload()" />
+
+    <div class="grid" style="margin-top: 24px">
+      <app-billing-card #billing [studentUserId]="auth.user()?.id ?? 0" />
+      @if (overview()?.student; as s) {
+        <mat-card appearance="outlined">
+          <mat-card-header><mat-card-title>{{ 'student.feedback' | translate }}</mat-card-title></mat-card-header>
+          <mat-card-content>
+            @for (f of s.recentFeedback; track f.id) {
+              <div class="feedback">
+                <div><b>{{ f.sessionTitle }}</b> <span class="stars">{{ stars(f.rating) }}</span></div>
+                @if (f.comment) { <p>{{ f.comment }}</p> }
+                <small class="muted">{{ f.teacherName }} · {{ f.sessionStartsAtUtc | utcDate: 'd MMM' }}</small>
+              </div>
+            } @empty { <p class="muted">{{ 'common.noData' | translate }}</p> }
+          </mat-card-content>
+        </mat-card>
+      }
       @if (points(); as p) {
         <mat-card appearance="outlined">
           <mat-card-header><mat-card-title>{{ 'student.badges' | translate }}</mat-card-title></mat-card-header>
@@ -207,6 +293,10 @@ export class SupervisorHomePage implements OnInit {
   styles: `
     .badge { display: flex; align-items: center; gap: 8px; padding: 4px 0; opacity: 0.5; }
     .badge.earned { opacity: 1; color: #b7791f; }
+    .feedback { padding: 8px 0; border-bottom: 1px dashed var(--app-border); }
+    .feedback:last-child { border-bottom: 0; }
+    .feedback p { margin: 4px 0; }
+    .stars { color: #f59e0b; letter-spacing: 1px; }
   `,
 })
 export class StudentHomePage implements OnInit {
@@ -215,6 +305,10 @@ export class StudentHomePage implements OnInit {
   protected readonly overview = signal<MyOverviewDto | null>(null);
   protected readonly points = signal<StudentPointsDto | null>(null);
   protected readonly leaderboard = signal<LeaderboardEntry[]>([]);
+
+  protected stars(n: number): string {
+    return '★'.repeat(n) + '☆'.repeat(5 - n);
+  }
 
   ngOnInit(): void {
     this.api.get<MyOverviewDto>(`${Api.academic}/me/overview`).subscribe((o) => this.overview.set(o));
@@ -226,12 +320,14 @@ export class StudentHomePage implements OnInit {
 /** Parent portal: each child's attendance, feedback, sessions and monthly payments, with online pay (US-039, US-040). */
 @Component({
   selector: 'app-parent-home',
-  imports: [PAGE_IMPORTS, StudentCard],
+  imports: [PAGE_IMPORTS, StudentCard, MySessions],
   template: `
     <div class="page-header"><h1>{{ 'nav.parentPortal' | translate }}</h1></div>
     @if (paymentResult(); as r) {
       <p class="status" [class.ok]="r === 'success'" [class.warn]="r === 'pending'" [class.bad]="r === 'failed' || r === 'cancelled'">{{ 'parent.payment_' + r | translate }}</p>
     }
+    <app-my-sessions [canExcuse]="true" breakdown="student" />
+    <div style="height: 24px"></div>
     @for (child of overview()?.children ?? []; track child.userId) {
       <mat-card appearance="outlined" class="panel">
         <mat-card-header><mat-card-title>{{ child.fullName }}</mat-card-title><mat-card-subtitle>{{ child.level }}</mat-card-subtitle></mat-card-header>

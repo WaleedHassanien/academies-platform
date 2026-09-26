@@ -17,6 +17,11 @@ export class Notifier {
     this.snack.open(this.translate.instant(key, params), undefined, { duration: 3000 });
   }
 
+  /** A translated string, e.g. for a browser prompt. */
+  text(key: string, params?: Record<string, unknown>): string {
+    return this.translate.instant(key, params);
+  }
+
   error(err: unknown): void {
     this.snack.open(apiErrorMessage(err, this.translate.instant('common.error')), this.translate.instant('common.close'), {
       duration: 6000,

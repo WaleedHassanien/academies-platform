@@ -48,6 +48,21 @@ public sealed class SessionsController(ISessionService sessions) : ControllerBas
     public async Task<ActionResult<ApiResponse<SessionDto>>> MeetingLink(long id, CancellationToken ct) =>
         Ok(ApiResponse<SessionDto>.Ok(await sessions.GenerateMeetingLinkAsync(id, ct)));
 
+    /// <summary>The caller's personal link into the online room (no Jitsi login needed with a token provider).</summary>
+    [HttpGet("{id:long}/join")]
+    public async Task<ActionResult<ApiResponse<JoinLinkDto>>> Join(long id, CancellationToken ct) =>
+        Ok(ApiResponse<JoinLinkDto>.Ok(await sessions.JoinAsync(id, ct)));
+
+    /// <summary>A teacher's own permanent room, to open any time.</summary>
+    [HttpGet("~/me/meeting-room")]
+    public async Task<ActionResult<ApiResponse<JoinLinkDto>>> MyRoom(CancellationToken ct) =>
+        Ok(ApiResponse<JoinLinkDto>.Ok(await sessions.MyRoomAsync(ct)));
+
+    /// <summary>A teacher's room link for their supervisor or staff to send them (valid for <paramref name="days"/> days).</summary>
+    [HttpGet("~/teachers/{teacherUserId:long}/meeting-room-link")]
+    public async Task<ActionResult<ApiResponse<JoinLinkDto>>> TeacherRoomLink(long teacherUserId, [FromQuery] int days = 30, CancellationToken ct = default) =>
+        Ok(ApiResponse<JoinLinkDto>.Ok(await sessions.TeacherRoomLinkAsync(teacherUserId, days, ct)));
+
     [HttpGet("{id:long}/roster")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<RosterItemDto>>>> Roster(long id, CancellationToken ct) =>
         Ok(ApiResponse<IReadOnlyList<RosterItemDto>>.Ok(await sessions.RosterAsync(id, ct)));
@@ -63,6 +78,42 @@ public sealed class SessionsController(ISessionService sessions) : ControllerBas
         Ok(ApiResponse<IReadOnlyList<RosterItemDto>>.Ok(await sessions.SaveFeedbackAsync(id, request, ct)));
 }
 
+/// <summary>
+/// Excuses and unexcused absences on one-to-one sessions, and the session report on each role's
+/// dashboard. Who may do what is checked in <see cref="ISessionOutcomeService"/>.
+/// </summary>
+[ApiController]
+[Authorize]
+public sealed class SessionOutcomesController(ISessionOutcomeService outcomes) : ControllerBase
+{
+    /// <summary>The student (or parent, teacher, supervisor, staff) excuses the student from the session.</summary>
+    [HttpPost("sessions/{id:long}/excuse")]
+    public async Task<ActionResult<ApiResponse<SessionDto>>> Excuse(long id, RequestExcuseRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<SessionDto>.Ok(await outcomes.RequestExcuseAsync(id, request, ct)));
+
+    [HttpGet("excuses")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<ExcuseItemDto>>>> Excuses([FromQuery] string? status, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<ExcuseItemDto>>.Ok(await outcomes.ExcusesAsync(status, ct)));
+
+    /// <summary>Reschedule, carry over to next month, don't count, deduct from next month, or reject.</summary>
+    [HttpPost("excuses/{id:long}/resolve")]
+    public async Task<ActionResult<ApiResponse<SessionDto>>> Resolve(long id, ResolveExcuseRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<SessionDto>.Ok(await outcomes.ResolveExcuseAsync(id, request, ct)));
+
+    /// <summary>Whether an unexcused absence counts (billed and paid) or not.</summary>
+    [HttpPut("sessions/{id:long}/absence-decision")]
+    public async Task<ActionResult<ApiResponse<SessionDto>>> DecideAbsence(long id, AbsenceDecisionRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<SessionDto>.Ok(await outcomes.DecideAbsenceAsync(id, request, ct)));
+
+    [HttpGet("absences/pending")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<SessionDto>>>> PendingAbsences(CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<SessionDto>>.Ok(await outcomes.PendingAbsencesAsync(ct)));
+
+    [HttpGet("me/session-report")]
+    public async Task<ActionResult<ApiResponse<SessionReportDto>>> Report([FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc, CancellationToken ct) =>
+        Ok(ApiResponse<SessionReportDto>.Ok(await outcomes.ReportAsync(fromUtc, toUtc, ct)));
+}
+
 /// <summary>Per-student views: feedback, points, and the role dashboards (US-027, US-028, US-040, US-042).</summary>
 [ApiController]
 [Authorize]
@@ -71,6 +122,11 @@ public sealed class StudentViewsController(ISessionService sessions, IGamificati
     [HttpGet("students/{userId:long}/feedback")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<FeedbackDto>>>> Feedback(long userId, [FromQuery] int take = 50, CancellationToken ct = default) =>
         Ok(ApiResponse<IReadOnlyList<FeedbackDto>>.Ok(await sessions.StudentFeedbackAsync(userId, take, ct)));
+
+    /// <summary>Every session the student belongs to (past and upcoming), with their attendance and feedback.</summary>
+    [HttpGet("students/{userId:long}/sessions")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<StudentSessionDto>>>> Sessions(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<StudentSessionDto>>.Ok(await sessions.StudentSessionsAsync(userId, ct)));
 
     [HttpGet("students/{userId:long}/points")]
     public async Task<ActionResult<ApiResponse<StudentPointsDto>>> Points(long userId, CancellationToken ct) =>
@@ -142,8 +198,18 @@ public sealed class LearningController(IAssignmentService assignments, ICertific
 [InternalApi]
 [Route("internal")]
 [ApiExplorerSettings(IgnoreApi = true)]
-public sealed class InternalAcademicController(IOverviewService overview) : ControllerBase
+public sealed class InternalAcademicController(IOverviewService overview, ISessionOutcomeService outcomes) : ControllerBase
 {
+    /// <summary>One-to-one sessions with their outcome, for student billing and teacher payouts.</summary>
+    [HttpGet("sessions/ledger")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<LedgerSessionDto>>>> Ledger(
+        [FromQuery] long academyId, [FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc, [FromQuery] long? teacherUserId,
+        [FromQuery] long? studentUserId, CancellationToken ct)
+    {
+        using var _ = CurrentUserOverride.Begin(SystemCurrentUser.ForAcademy(academyId));
+        return Ok(ApiResponse<IReadOnlyList<LedgerSessionDto>>.Ok(await outcomes.LedgerAsync(fromUtc, toUtc, teacherUserId, studentUserId, ct)));
+    }
+
     [HttpGet("sessions/completed-counts")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<TeacherSessionCountDto>>>> CompletedCounts(
         [FromQuery] long academyId, [FromQuery] int year, [FromQuery] int month, CancellationToken ct)

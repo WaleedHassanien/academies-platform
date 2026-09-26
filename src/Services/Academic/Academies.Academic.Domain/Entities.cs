@@ -23,6 +23,12 @@ public sealed class Student : BaseEntity, ITenantEntity
     public DateOnly EnrollmentDate { get; set; }
     public StudentStatus Status { get; set; } = StudentStatus.Active;
 
+    /// <summary>IANA time zone the student lives in (e.g. "Asia/Riyadh"), so session times can be shown in their local time.</summary>
+    public string? TimeZone { get; set; }
+
+    /// <summary>Usual length of this student's one-to-one session; pre-fills scheduling.</summary>
+    public int SessionMinutes { get; set; } = 30;
+
     /// <summary>The guardian's UserId (a user with the Parent role).</summary>
     public long? ParentUserId { get; set; }
 }
@@ -127,12 +133,15 @@ public enum SessionType
     Online = 2,
 }
 
-/// <summary>Completed sessions are what teacher salaries count (US-032).</summary>
+/// <summary>Completed sessions are what teachers are paid for and students are billed for.</summary>
 public enum SessionStatus
 {
     Scheduled = 1,
     Completed = 2,
     Cancelled = 3,
+
+    /// <summary>The student excused themself; see <see cref="SessionExcuse"/> for what happens instead.</summary>
+    Excused = 4,
 }
 
 public sealed class Session : BaseEntity, ITenantEntity
@@ -141,6 +150,20 @@ public sealed class Session : BaseEntity, ITenantEntity
     public required string Title { get; set; }
     public long CourseId { get; set; }
     public long? GroupId { get; set; }
+
+    /// <summary>Set for one-to-one sessions: the only student on the roster, and who is billed for it.</summary>
+    public long? StudentUserId { get; set; }
+
+    /// <summary>A make-up session points at the excused session it replaces.</summary>
+    public long? MakeupOfSessionId { get; set; }
+
+    /// <summary>
+    /// For a one-to-one session the student missed without an excuse, the supervisor's call:
+    /// true = it counts (student billed, teacher paid), false = it doesn't, null = not decided yet.
+    /// </summary>
+    public bool? AbsenceCounted { get; set; }
+
+    public long? AbsenceDecidedByUserId { get; set; }
     public long TeacherUserId { get; set; }
     public DateTime StartsAtUtc { get; set; }
     public DateTime EndsAtUtc { get; set; }
@@ -169,6 +192,51 @@ public sealed class Attendance : BaseEntity, ITenantEntity
     public long StudentUserId { get; set; }
     public AttendanceStatus Status { get; set; }
     public string? Note { get; set; }
+}
+
+// ---------- Excuses ----------
+
+public enum ExcuseStatus
+{
+    Pending = 1,
+    Resolved = 2,
+    Rejected = 3,
+}
+
+/// <summary>What happens to a session the student excused themself from.</summary>
+public enum ExcuseResolution
+{
+    /// <summary>A make-up session is scheduled at another time; it is billed and paid instead.</summary>
+    Rescheduled = 1,
+
+    /// <summary>Moved to next month: a prepaid student gets one extra session in next month's package.</summary>
+    CarriedOver = 2,
+
+    /// <summary>Dropped: not billed, not paid, no credit.</summary>
+    NotCounted = 3,
+
+    /// <summary>A prepaid student's next monthly invoice is reduced by this session's price.</summary>
+    DeductedNextMonth = 4,
+}
+
+/// <summary>A student's request to miss a one-to-one session, and how staff settled it.</summary>
+public sealed class SessionExcuse : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long SessionId { get; set; }
+    public long StudentUserId { get; set; }
+    public long RequestedByUserId { get; set; }
+    public string? Reason { get; set; }
+
+    /// <summary>A time the student suggests for a make-up session, if any.</summary>
+    public DateTime? PreferredStartsAtUtc { get; set; }
+
+    public ExcuseStatus Status { get; set; } = ExcuseStatus.Pending;
+    public ExcuseResolution? Resolution { get; set; }
+    public long? MakeupSessionId { get; set; }
+    public long? ResolvedByUserId { get; set; }
+    public DateTime? ResolvedOnUtc { get; set; }
+    public string? ResolutionNote { get; set; }
 }
 
 public sealed class SessionFeedback : BaseEntity, ITenantEntity

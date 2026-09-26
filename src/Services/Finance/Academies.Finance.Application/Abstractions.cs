@@ -20,16 +20,64 @@ public interface IFinanceDbContext
     DbSet<Expense> Expenses { get; }
     DbSet<OnlinePayment> OnlinePayments { get; }
     DbSet<FinanceSettings> Settings { get; }
+    DbSet<StudentBilling> StudentBillings { get; }
+    DbSet<TeacherStudentRate> TeacherRates { get; }
+    DbSet<StudentInvoiceLine> InvoiceLines { get; }
+    DbSet<TeacherPayout> Payouts { get; }
+    DbSet<TeacherPayoutLine> PayoutLines { get; }
+    DbSet<MonthClose> MonthCloses { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed record TeacherSessionCount(long TeacherUserId, int CompletedSessions);
 
-/// <summary>Reads from the Academic service (completed sessions per teacher, for US-032).</summary>
+/// <summary>
+/// A one-to-one session and what happened to it, from Academic. <see cref="Counts"/>: the student
+/// is billed and the teacher is paid. <see cref="ExcuseResolution"/> is set for excused sessions.
+/// </summary>
+public sealed record LedgerSession(
+    long SessionId, long TeacherUserId, long StudentUserId, DateTime StartsAtUtc, int DurationMinutes, string Outcome, bool Counts,
+    string? ExcuseResolution, long? MakeupOfSessionId);
+
+/// <summary>Reads from the Academic service.</summary>
 public interface IAcademicClient
 {
+    /// <summary>Completed sessions per teacher (fixed-salary era report).</summary>
     Task<IReadOnlyList<TeacherSessionCount>> CompletedSessionCountsAsync(long academyId, int year, int month, CancellationToken ct = default);
+
+    Task<IReadOnlyList<LedgerSession>> LedgerAsync(
+        long academyId, DateTime fromUtc, DateTime toUtc, long? teacherUserId = null, long? studentUserId = null, CancellationToken ct = default);
+}
+
+/// <summary>
+/// The academy runs on Egypt time: months start and end at Cairo midnight, and the month-end
+/// close happens in the last hour of the month there.
+/// </summary>
+public static class AcademyCalendar
+{
+    public static readonly TimeZoneInfo Zone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
+
+    public static DateTime ToLocal(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Zone);
+
+    public static DateTime ToUtc(DateTime local) => TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), Zone);
+
+    /// <summary>[start, end) of a calendar month in Egypt, as UTC instants.</summary>
+    public static (DateTime FromUtc, DateTime ToUtc) MonthUtc(int year, int month) =>
+        (ToUtc(new DateTime(year, month, 1)), ToUtc(new DateTime(year, month, 1).AddMonths(1)));
+
+    public static (int Year, int Month) MonthOf(DateTime utc)
+    {
+        var local = ToLocal(utc);
+        return (local.Year, local.Month);
+    }
+
+    /// <summary>True during the last hour of the month (23:00–24:00 on the last day, Egypt time).</summary>
+    public static bool IsLastHourOfMonth(DateTime utc)
+    {
+        var local = ToLocal(utc);
+        return local.Day == DateTime.DaysInMonth(local.Year, local.Month) && local.Hour == 23;
+    }
 }
 
 /// <summary><see cref="Amount"/> is in the academy currency; the gateway converts if it can't charge that currency.</summary>
@@ -99,6 +147,9 @@ public sealed class FinanceAccess(IFinanceDbContext db, ICurrentUser user)
     public bool SeesAllPayments => user.IsSuperAdmin || user.HasPermission(Permissions.Payments.Manage);
 
     public bool SeesAllSalaries => user.IsSuperAdmin || user.HasPermission(Permissions.Salaries.Manage);
+
+    /// <summary>A background job running for one academy (no user behind it).</summary>
+    public bool IsSystem => user.IsAuthenticated && user.UserId is null;
 
     public string? PrimaryRole => user.Roles.FirstOrDefault();
 

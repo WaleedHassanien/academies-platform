@@ -234,6 +234,53 @@ namespace Academies.Finance.Infrastructure.Persistence.Migrations
                     b.ToTable("FinanceSettings", (string)null);
                 });
 
+            modelBuilder.Entity("Academies.Finance.Domain.MonthClose", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AcademyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("ClosedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long?>("CreatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("UpdatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("UpdatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcademyId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("AcademyId", "Year", "Month")
+                        .IsUnique();
+
+                    b.ToTable("MonthCloses", (string)null);
+                });
+
             modelBuilder.Entity("Academies.Finance.Domain.OnlinePayment", b =>
                 {
                     b.Property<long>("Id")
@@ -642,6 +689,72 @@ namespace Academies.Finance.Infrastructure.Persistence.Migrations
                     b.ToTable("SalaryLogs", (string)null);
                 });
 
+            modelBuilder.Entity("Academies.Finance.Domain.StudentBilling", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AcademyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("CreatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("varchar(3)");
+
+                    b.Property<int>("DueDay")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<long>("PaymentPlanId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("PricePerSession")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<int>("SessionsPerMonth")
+                        .HasColumnType("int");
+
+                    b.Property<long>("StudentUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("UpdatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("UpdatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcademyId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("PaymentPlanId");
+
+                    b.HasIndex("StudentUserId")
+                        .IsUnique();
+
+                    b.ToTable("StudentBillings", (string)null);
+                });
+
             modelBuilder.Entity("Academies.Finance.Domain.StudentGuardian", b =>
                 {
                     b.Property<long>("Id")
@@ -685,6 +798,74 @@ namespace Academies.Finance.Infrastructure.Persistence.Migrations
                     b.HasIndex("StudentUserId");
 
                     b.ToTable("StudentGuardians", (string)null);
+                });
+
+            modelBuilder.Entity("Academies.Finance.Domain.StudentInvoiceLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AcademyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<long?>("CreatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("SessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("SessionStartsAtUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("StudentPaymentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("StudentUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<long?>("UpdatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("UpdatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcademyId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("StudentPaymentId");
+
+                    b.HasIndex("SessionId", "Kind")
+                        .IsUnique();
+
+                    b.ToTable("StudentInvoiceLines", (string)null);
                 });
 
             modelBuilder.Entity("Academies.Finance.Domain.StudentPayment", b =>
@@ -765,6 +946,202 @@ namespace Academies.Finance.Infrastructure.Persistence.Migrations
                     b.HasIndex("StudentUserId", "MonthNumber");
 
                     b.ToTable("StudentPayments", (string)null);
+                });
+
+            modelBuilder.Entity("Academies.Finance.Domain.TeacherPayout", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AcademyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<long?>("CreatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("varchar(3)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<long?>("PaidByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("PaidOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("SessionsCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<long>("TeacherUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("UpdatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("UpdatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcademyId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("TeacherUserId", "Status");
+
+                    b.HasIndex("Year", "Month", "TeacherUserId");
+
+                    b.ToTable("TeacherPayouts", (string)null);
+                });
+
+            modelBuilder.Entity("Academies.Finance.Domain.TeacherPayoutLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AcademyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("CreatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("DurationMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<long>("SessionId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("SessionStartsAtUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("StudentUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("TeacherPayoutId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("UpdatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("UpdatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcademyId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("SessionId")
+                        .IsUnique();
+
+                    b.HasIndex("TeacherPayoutId");
+
+                    b.ToTable("TeacherPayoutLines", (string)null);
+                });
+
+            modelBuilder.Entity("Academies.Finance.Domain.TeacherStudentRate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AcademyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("CreatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<decimal>("RatePerSession")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("decimal(12,2)");
+
+                    b.Property<long>("StudentUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("TeacherUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("UpdatedBy")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("UpdatedOnUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcademyId");
+
+                    b.HasIndex("IsDeleted");
+
+                    b.HasIndex("TeacherUserId", "StudentUserId")
+                        .IsUnique();
+
+                    b.ToTable("TeacherStudentRates", (string)null);
                 });
 
             modelBuilder.Entity("MassTransit.EntityFrameworkCoreIntegration.InboxState", b =>
@@ -953,11 +1330,38 @@ namespace Academies.Finance.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Academies.Finance.Domain.StudentBilling", b =>
+                {
+                    b.HasOne("Academies.Finance.Domain.PaymentPlan", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Academies.Finance.Domain.StudentInvoiceLine", b =>
+                {
+                    b.HasOne("Academies.Finance.Domain.StudentPayment", null)
+                        .WithMany()
+                        .HasForeignKey("StudentPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Academies.Finance.Domain.StudentPayment", b =>
                 {
                     b.HasOne("Academies.Finance.Domain.PaymentPlan", null)
                         .WithMany()
                         .HasForeignKey("PaymentPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Academies.Finance.Domain.TeacherPayoutLine", b =>
+                {
+                    b.HasOne("Academies.Finance.Domain.TeacherPayout", null)
+                        .WithMany()
+                        .HasForeignKey("TeacherPayoutId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

@@ -11,13 +11,15 @@ namespace Academies.Academic.Application;
 
 // ---------- DTOs ----------
 
+/// <summary><see cref="Teachers"/> are the student's own teachers plus the teachers of their groups.</summary>
 public sealed record StudentDto(
     long UserId, string FullName, string Email, string? Level, DateOnly EnrollmentDate, string Status,
-    long? ParentUserId, string? ParentName, IReadOnlyList<string> Groups);
+    long? ParentUserId, string? ParentName, IReadOnlyList<string> Groups, string? TimeZone, IReadOnlyList<PersonRefDto> Teachers, int SessionMinutes);
 
 public sealed record StudentQuery(string? Search = null, long? GroupId = null, long? TeacherUserId = null, string? Status = null, int Page = 1, int PageSize = 20);
 
-public sealed record UpdateStudentRequest(string? Level, DateOnly EnrollmentDate, StudentStatus Status);
+/// <summary><see cref="TimeZone"/> is an IANA id such as "Asia/Riyadh"; null clears it.</summary>
+public sealed record UpdateStudentRequest(string? Level, DateOnly EnrollmentDate, StudentStatus Status, string? TimeZone = null, int? SessionMinutes = null);
 
 public sealed record SetParentRequest(long? ParentUserId);
 
@@ -110,6 +112,8 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
         student.Level = request.Level;
         student.EnrollmentDate = request.EnrollmentDate;
         student.Status = request.Status;
+        student.TimeZone = string.IsNullOrWhiteSpace(request.TimeZone) ? null : request.TimeZone.Trim();
+        student.SessionMinutes = request.SessionMinutes ?? student.SessionMinutes;
         await db.SaveChangesAsync(ct);
         return await GetStudentAsync(userId, ct);
     }
@@ -231,8 +235,19 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
         var studentIds = students.Select(s => s.UserId).ToList();
         var groups = await db.GroupStudents
             .Where(gs => studentIds.Contains(gs.StudentUserId))
-            .Join(db.Groups, gs => gs.GroupId, g => g.Id, (gs, g) => new { gs.StudentUserId, g.Name })
+            .Join(db.Groups, gs => gs.GroupId, g => g.Id, (gs, g) => new { gs.StudentUserId, g.Name, g.TeacherUserId })
             .ToListAsync(ct);
+
+        // Responsible teachers: direct teacher links plus each group's teacher (same rule as AccessGuard).
+        var direct = await db.TeacherStudents
+            .Where(t => studentIds.Contains(t.StudentUserId))
+            .Select(t => new { t.StudentUserId, t.TeacherUserId })
+            .ToListAsync(ct);
+        var teacherLinks = direct
+            .Concat(groups.Where(g => g.TeacherUserId.HasValue).Select(g => new { g.StudentUserId, TeacherUserId = g.TeacherUserId!.Value }))
+            .Distinct()
+            .ToList();
+        var teacherNames = await db.People.NamesAsync(teacherLinks.Select(t => t.TeacherUserId), ct);
 
         return students.Select(s => new StudentDto(
             s.UserId,
@@ -240,7 +255,13 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
             people.GetValueOrDefault(s.UserId)?.Email ?? "",
             s.Level, s.EnrollmentDate, s.Status.ToString(), s.ParentUserId,
             s.ParentUserId is { } p ? people.GetValueOrDefault(p)?.FullName : null,
-            groups.Where(g => g.StudentUserId == s.UserId).Select(g => g.Name).ToList())).ToList();
+            groups.Where(g => g.StudentUserId == s.UserId).Select(g => g.Name).ToList(),
+            s.TimeZone,
+            teacherLinks.Where(t => t.StudentUserId == s.UserId)
+                .Select(t => new PersonRefDto(t.TeacherUserId, teacherNames.GetValueOrDefault(t.TeacherUserId, $"#{t.TeacherUserId}")))
+                .OrderBy(t => t.FullName)
+                .ToList(),
+            s.SessionMinutes)).ToList();
     }
 
     private static StaffProfileDto Staff(Dictionary<long, BuildingBlocks.Domain.Person> people, long userId, string? specialization, string? notes, int linked)
@@ -324,5 +345,12 @@ internal sealed class UpdateStudentValidator : AbstractValidator<UpdateStudentRe
     {
         RuleFor(x => x.Level).MaximumLength(50);
         RuleFor(x => x.Status).IsInEnum();
+        RuleFor(x => x.TimeZone)
+            .MaximumLength(64)
+            // IANA ids only ("Area/City", or UTC), so every browser can format times in it.
+            .Must(tz => (tz!.Contains('/') || tz.Trim() == "UTC") && TimeZoneInfo.TryFindSystemTimeZoneById(tz.Trim(), out _))
+            .WithMessage("Choose a valid time zone, such as Asia/Riyadh.")
+            .When(x => !string.IsNullOrWhiteSpace(x.TimeZone));
+        RuleFor(x => x.SessionMinutes).InclusiveBetween(15, 240).When(x => x.SessionMinutes.HasValue);
     }
 }

@@ -158,7 +158,20 @@ All 44 stories (US-001 → US-043) are implemented:
     - Events: `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.DENIED`.
     - Signatures are verified with PayPal before anything is applied.
   - **Other providers:** Paymob and Fawry can be added as further `IPaymentGateway` implementations.
-- **Online sessions (US-037):**
-  - Links are generated on Jitsi Meet, which needs no keys.
+- **Online sessions (US-037), Jitsi:**
+  - **One room per teacher:** every teacher has a permanent, unguessable room (`Meetings:RoomSecret`), so two
+    teachers never share a room even at the same hour. Students can enter from 30 minutes before their session
+    until 15 minutes after it.
+  - **Join links:** "Join" asks the API (`GET sessions/{id}/join`) for a personal link with the person's name
+    and email from the system. Supervisors and admins can share a teacher's room link (copy or WhatsApp) from
+    their dashboard or the Teachers page (`GET teachers/{id}/meeting-room-link`).
+  - **No Jitsi login (`Meetings:Provider`):**
+    - `Public`: rooms on `Meetings:BaseUrl`. meet.jit.si makes the first person log in.
+    - `JaaS` (recommended): create an app at jaas.8x8.vc, add an API key, and set `Meetings:JaaS:AppId`,
+      `Meetings:JaaS:KeyId` (the full `vpaas-magic-cookie-…/…` id) and `Meetings:JaaS:PrivateKeyPath` (the
+      downloaded `.pk` file). Each link then carries a signed token; the teacher opens their room as moderator
+      without logging in.
+    - `SelfHosted`: your own Jitsi server with token auth: set `Meetings:SelfHosted:Domain`, `AppId` and
+      `AppSecret` (32+ characters).
   - Zoom and Google Meet need OAuth apps; implement `IMeetingLinkGenerator` for them.
 - **Email (US-012, US-035):** without `SMTP_HOST` (`Email:SmtpHost`), emails are written to the Identity and Engagement logs.

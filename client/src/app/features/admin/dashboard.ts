@@ -22,14 +22,14 @@ import { BarChart, ChartSeries, Stat } from '../../shared/ui';
 
     @if (data(); as d) {
       <div class="stats">
-        <app-stat [label]="'dashboard.activeStudents' | translate" [value]="d.academic.activeStudents" />
-        <app-stat [label]="'dashboard.teachers' | translate" [value]="d.academic.teachers" />
-        <app-stat [label]="'dashboard.sessionsCompleted' | translate" [value]="d.academic.sessionsCompleted" [hint]="('dashboard.scheduled' | translate) + ': ' + d.academic.sessionsScheduled" />
-        <app-stat [label]="'dashboard.attendanceRate' | translate" [value]="d.academic.attendanceRate + '%'" />
+        <app-stat icon="school" [label]="'dashboard.activeStudents' | translate" [value]="d.academic.activeStudents" />
+        <app-stat icon="co_present" [label]="'dashboard.teachers' | translate" [value]="d.academic.teachers" />
+        <app-stat icon="event_available" [label]="'dashboard.sessionsCompleted' | translate" [value]="d.academic.sessionsCompleted" [hint]="('dashboard.scheduled' | translate) + ': ' + d.academic.sessionsScheduled" />
+        <app-stat icon="how_to_reg" [label]="'dashboard.attendanceRate' | translate" [value]="d.academic.attendanceRate + '%'" />
         @if (d.finance; as f) {
-          <app-stat [label]="'finance.revenue' | translate" [value]="(f.revenue | number: '1.0-0') ?? ''" />
-          <app-stat [label]="'finance.net' | translate" [value]="(f.net | number: '1.0-0') ?? ''" />
-          <app-stat [label]="'finance.outstanding' | translate" [value]="(f.outstanding | number: '1.0-0') ?? ''" />
+          <app-stat icon="trending_up" [label]="'finance.revenue' | translate" [value]="(f.revenue | number: '1.0-0') ?? ''" />
+          <app-stat icon="account_balance" [label]="'finance.net' | translate" [value]="(f.net | number: '1.0-0') ?? ''" />
+          <app-stat icon="pending_actions" [label]="'finance.outstanding' | translate" [value]="(f.outstanding | number: '1.0-0') ?? ''" />
         }
       </div>
 
@@ -81,17 +81,17 @@ export class DashboardPage implements OnInit {
   protected readonly academicSeries = computed<ChartSeries[]>(() => {
     const monthly = this.data()?.academic.monthly ?? [];
     return [
-      { name: this.translate.instant('dashboard.sessionsCompleted'), values: monthly.map((m) => m.sessionsCompleted), color: '#1e6fd9' },
-      { name: this.translate.instant('dashboard.attendanceRate'), values: monthly.map((m) => m.attendanceRate), color: '#2e9d5b' },
+      { name: this.translate.instant('dashboard.sessionsCompleted'), values: monthly.map((m) => m.sessionsCompleted), color: '#6d4aff' },
+      { name: this.translate.instant('dashboard.attendanceRate'), values: monthly.map((m) => m.attendanceRate), color: '#10b981' },
     ];
   });
   protected readonly financeMonths = computed(() => this.data()?.finance?.monthly.map((m) => m.month.slice(2)) ?? []);
   protected readonly financeSeries = computed<ChartSeries[]>(() => {
     const monthly = this.data()?.finance?.monthly ?? [];
     return [
-      { name: this.translate.instant('finance.revenue'), values: monthly.map((m) => m.revenue), color: '#2e9d5b' },
-      { name: this.translate.instant('finance.salaries'), values: monthly.map((m) => m.salaries), color: '#e0a100' },
-      { name: this.translate.instant('finance.expenses'), values: monthly.map((m) => m.expenses), color: '#d64545' },
+      { name: this.translate.instant('finance.revenue'), values: monthly.map((m) => m.revenue), color: '#10b981' },
+      { name: this.translate.instant('finance.salaries'), values: monthly.map((m) => m.salaries), color: '#f59e0b' },
+      { name: this.translate.instant('finance.expenses'), values: monthly.map((m) => m.expenses), color: '#f43f5e' },
     ];
   });
 

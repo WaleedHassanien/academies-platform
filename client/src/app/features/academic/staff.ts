@@ -6,6 +6,7 @@ import { AuthService } from '../../core/auth/auth.service';
 import { Permissions } from '../../core/auth/permissions';
 import { Notifier } from '../../shared/notifier';
 import { PAGE_IMPORTS } from '../../shared/page-imports';
+import { SessionActions } from '../../shared/sessions-kit';
 
 /**
  * Teachers, supervisors and parents (US-020). Covers supervisor shifts (US-021),
@@ -27,7 +28,10 @@ import { PAGE_IMPORTS } from '../../shared/page-imports';
                   <td>{{ t.fullName }}</td>
                   <td>{{ t.specialization ?? '—' }}</td>
                   <td class="num">{{ t.linkedCount }}</td>
-                  <td class="actions">@if (canManage) { <button mat-button (click)="openTeacher(t)">{{ 'common.edit' | translate }}</button> }</td>
+                  <td class="actions">
+                    <button mat-stroked-button (click)="actions.shareTeacherRoom(t)"><mat-icon>link</mat-icon>{{ 'room.link' | translate }}</button>
+                    @if (canManage) { <button mat-button (click)="openTeacher(t)">{{ 'common.edit' | translate }}</button> }
+                  </td>
                 </tr>
               } @empty { <tr><td colspan="4" class="empty">{{ 'common.noData' | translate }}</td></tr> }
             </tbody>
@@ -129,6 +133,7 @@ export class StaffPage implements OnInit {
   private readonly notify = inject(Notifier);
   protected readonly canManage = inject(AuthService).hasPermission(Permissions.profiles.manage);
 
+  protected readonly actions = inject(SessionActions);
   protected readonly teachers = signal<StaffProfileDto[]>([]);
   protected readonly supervisors = signal<StaffProfileDto[]>([]);
   protected readonly parents = signal<ParentDto[]>([]);

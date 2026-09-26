@@ -4,6 +4,7 @@ using Academies.Academic.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Academies.Academic.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AcademicDbContext))]
-    partial class AcademicDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260924215500_StudentTimeZone")]
+    partial class StudentTimeZone
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -567,12 +570,6 @@ namespace Academies.Academic.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
 
-                    b.Property<bool?>("AbsenceCounted")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<long?>("AbsenceDecidedByUserId")
-                        .HasColumnType("bigint");
-
                     b.Property<long>("AcademyId")
                         .HasColumnType("bigint");
 
@@ -601,9 +598,6 @@ namespace Academies.Academic.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
 
-                    b.Property<long?>("MakeupOfSessionId")
-                        .HasColumnType("bigint");
-
                     b.Property<string>("MeetingUrl")
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)");
@@ -622,9 +616,6 @@ namespace Academies.Academic.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)");
-
-                    b.Property<long?>("StudentUserId")
-                        .HasColumnType("bigint");
 
                     b.Property<long>("TeacherUserId")
                         .HasColumnType("bigint");
@@ -653,96 +644,13 @@ namespace Academies.Academic.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("IsDeleted");
 
-                    b.HasIndex("MakeupOfSessionId");
-
                     b.HasIndex("GroupId", "StartsAtUtc");
 
                     b.HasIndex("Status", "StartsAtUtc");
 
-                    b.HasIndex("StudentUserId", "StartsAtUtc");
-
                     b.HasIndex("TeacherUserId", "StartsAtUtc");
 
                     b.ToTable("Sessions", (string)null);
-                });
-
-            modelBuilder.Entity("Academies.Academic.Domain.SessionExcuse", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("AcademyId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("CreatedBy")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("CreatedOnUtc")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<long?>("MakeupSessionId")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime?>("PreferredStartsAtUtc")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(1000)
-                        .HasColumnType("varchar(1000)");
-
-                    b.Property<long>("RequestedByUserId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Resolution")
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)");
-
-                    b.Property<string>("ResolutionNote")
-                        .HasMaxLength(1000)
-                        .HasColumnType("varchar(1000)");
-
-                    b.Property<long?>("ResolvedByUserId")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime?>("ResolvedOnUtc")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<long>("SessionId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)");
-
-                    b.Property<long>("StudentUserId")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("UpdatedBy")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime?>("UpdatedOnUtc")
-                        .HasColumnType("datetime(6)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AcademyId");
-
-                    b.HasIndex("IsDeleted");
-
-                    b.HasIndex("SessionId");
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("StudentUserId", "Status");
-
-                    b.ToTable("SessionExcuses", (string)null);
                 });
 
             modelBuilder.Entity("Academies.Academic.Domain.SessionFeedback", b =>
@@ -829,9 +737,6 @@ namespace Academies.Academic.Infrastructure.Persistence.Migrations
 
                     b.Property<long?>("ParentUserId")
                         .HasColumnType("bigint");
-
-                    b.Property<int>("SessionMinutes")
-                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1431,15 +1336,6 @@ namespace Academies.Academic.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("GroupId")
                         .OnDelete(DeleteBehavior.Restrict);
-                });
-
-            modelBuilder.Entity("Academies.Academic.Domain.SessionExcuse", b =>
-                {
-                    b.HasOne("Academies.Academic.Domain.Session", null)
-                        .WithMany()
-                        .HasForeignKey("SessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Academies.Academic.Domain.SessionFeedback", b =>

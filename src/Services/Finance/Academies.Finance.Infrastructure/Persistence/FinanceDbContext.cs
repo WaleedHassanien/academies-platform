@@ -26,6 +26,12 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options,
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<OnlinePayment> OnlinePayments => Set<OnlinePayment>();
     public DbSet<FinanceSettings> Settings => Set<FinanceSettings>();
+    public DbSet<StudentBilling> StudentBillings => Set<StudentBilling>();
+    public DbSet<TeacherStudentRate> TeacherRates => Set<TeacherStudentRate>();
+    public DbSet<StudentInvoiceLine> InvoiceLines => Set<StudentInvoiceLine>();
+    public DbSet<TeacherPayout> Payouts => Set<TeacherPayout>();
+    public DbSet<TeacherPayoutLine> PayoutLines => Set<TeacherPayoutLine>();
+    public DbSet<MonthClose> MonthCloses => Set<MonthClose>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -133,6 +139,58 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options,
         {
             e.ToTable("FinanceSettings");
             e.Property(x => x.Currency).HasMaxLength(3);
+        });
+        b.Entity<StudentBilling>(e =>
+        {
+            e.ToTable("StudentBillings");
+            e.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.PricePerSession).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.HasOne<PaymentPlan>().WithMany().HasForeignKey(x => x.PaymentPlanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.StudentUserId).IsUnique();
+        });
+        b.Entity<TeacherStudentRate>(e =>
+        {
+            e.ToTable("TeacherStudentRates");
+            e.Property(x => x.RatePerSession).HasPrecision(12, 2);
+            e.HasIndex(x => new { x.TeacherUserId, x.StudentUserId }).IsUnique();
+        });
+        b.Entity<StudentInvoiceLine>(e =>
+        {
+            e.ToTable("StudentInvoiceLines");
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.UnitPrice).HasPrecision(12, 2);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.HasOne<StudentPayment>().WithMany().HasForeignKey(x => x.StudentPaymentId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.StudentPaymentId);
+            // A session is billed, deducted or carried at most once.
+            e.HasIndex(x => new { x.SessionId, x.Kind }).IsUnique();
+        });
+        b.Entity<TeacherPayout>(e =>
+        {
+            e.ToTable("TeacherPayouts");
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.Reference).HasMaxLength(100);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.HasIndex(x => new { x.Year, x.Month, x.TeacherUserId });
+            e.HasIndex(x => new { x.TeacherUserId, x.Status });
+        });
+        b.Entity<TeacherPayoutLine>(e =>
+        {
+            e.ToTable("TeacherPayoutLines");
+            e.Property(x => x.Outcome).HasMaxLength(30);
+            e.Property(x => x.Rate).HasPrecision(12, 2);
+            e.HasOne<TeacherPayout>().WithMany().HasForeignKey(x => x.TeacherPayoutId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.SessionId).IsUnique();
+            e.HasIndex(x => x.TeacherPayoutId);
+        });
+        b.Entity<MonthClose>(e =>
+        {
+            e.ToTable("MonthCloses");
+            e.HasIndex(x => new { x.AcademyId, x.Year, x.Month }).IsUnique();
         });
     }
 }

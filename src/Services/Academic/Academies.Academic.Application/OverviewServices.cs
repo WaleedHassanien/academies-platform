@@ -251,8 +251,8 @@ internal sealed class SessionReminderService(IAcademicDbContext db, IEventPublis
 
         foreach (var session in due)
         {
-            var students = session.GroupId is { } g
-                ? await db.GroupStudents.Where(gs => gs.GroupId == g).Select(gs => gs.StudentUserId).ToListAsync(ct)
+            var students = session.StudentUserId is { } only ? [only]
+                : session.GroupId is { } g ? await db.GroupStudents.Where(gs => gs.GroupId == g).Select(gs => gs.StudentUserId).ToListAsync(ct)
                 : [];
             var parents = await db.Students.Where(s => students.Contains(s.UserId) && s.ParentUserId != null)
                 .Select(s => s.ParentUserId!.Value).ToListAsync(ct);

@@ -58,58 +58,53 @@ public sealed class FinanceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Generate_pays_teacher_per_completed_session_and_supervisor_fixed()
+    public async Task Generate_builds_fixed_salaries_only_teachers_go_through_payouts()
     {
         await SetPayAsync();
-        _academic.Counts[Teacher] = 12;
 
         var result = await _h.RunAsync<ISalaryService, GenerateResultDto>(s => s.GenerateAsync(2026, 9));
 
-        result.Created.ShouldBe(2);
-        var teacher = result.Salaries.Single(s => s.UserId == Teacher);
-        teacher.Amount.ShouldBe(1200);
-        teacher.SessionsCount.ShouldBe(12);
-        teacher.RatePerSession.ShouldBe(100);
-        result.Salaries.Single(s => s.UserId == Supervisor).Amount.ShouldBe(5000);
+        result.Created.ShouldBe(1);
+        result.Salaries.Single().UserId.ShouldBe(Supervisor);
+        result.Salaries.Single().Amount.ShouldBe(5000);
     }
 
     [Fact]
     public async Task Unpaid_month_is_regenerated_but_paid_month_only_changes_by_adjustment()
     {
         await SetPayAsync();
-        _academic.Counts[Teacher] = 12;
         var first = await _h.RunAsync<ISalaryService, GenerateResultDto>(s => s.GenerateAsync(2026, 9));
-        var teacherSalary = first.Salaries.Single(s => s.UserId == Teacher);
         var supervisorSalary = first.Salaries.Single(s => s.UserId == Supervisor);
 
-        await _h.RunAsync<ISalaryService>(s => s.PayAsync(supervisorSalary.Id));
-
-        _academic.Counts[Teacher] = 15;
+        // Unpaid: a new pay setting is picked up on the next run.
+        await _h.RunAsync<ICompensationService>(s => s.SetAsync(Supervisor, new SetCompensationRequest(PayType.MonthlyFixed, 5500, new DateOnly(2026, 9, 1), null)));
         var second = await _h.RunAsync<ISalaryService, GenerateResultDto>(s => s.GenerateAsync(2026, 9));
         second.Regenerated.ShouldBe(1);
-        second.SkippedPaid.ShouldBe(1);
-        second.Salaries.Single(s => s.Id == teacherSalary.Id).Amount.ShouldBe(1500);
-        second.Salaries.Single(s => s.Id == supervisorSalary.Id).Amount.ShouldBe(5000);
+        second.Salaries.Single().Amount.ShouldBe(5500);
 
-        var adjusted = await _h.RunAsync<ISalaryService, SalaryDto>(s => s.AdjustAsync(supervisorSalary.Id, new AdjustSalaryRequest(5200, "Overtime")));
-        adjusted.Amount.ShouldBe(5200);
+        await _h.RunAsync<ISalaryService>(s => s.PayAsync(supervisorSalary.Id));
+        await _h.RunAsync<ICompensationService>(s => s.SetAsync(Supervisor, new SetCompensationRequest(PayType.MonthlyFixed, 6000, new DateOnly(2026, 9, 2), null)));
+        var third = await _h.RunAsync<ISalaryService, GenerateResultDto>(s => s.GenerateAsync(2026, 9));
+        third.SkippedPaid.ShouldBe(1);
+        third.Salaries.Single().Amount.ShouldBe(5500);
+
+        var adjusted = await _h.RunAsync<ISalaryService, SalaryDto>(s => s.AdjustAsync(supervisorSalary.Id, new AdjustSalaryRequest(5700, "Overtime")));
+        adjusted.Amount.ShouldBe(5700);
 
         var logs = await _h.RunAsync<ISalaryService, BuildingBlocks.Application.Models.PagedResult<SalaryLogDto>>(s => s.LogsAsync(new SalaryLogQuery(UserId: Supervisor)));
-        logs.Items.Select(l => l.Action).ShouldBe(["Adjusted", "Paid", "Created"], ignoreOrder: true);
+        logs.Items.Select(l => l.Action).ShouldBe(["Adjusted", "Paid", "Regenerated", "Created"], ignoreOrder: true);
     }
 
     [Fact]
     public async Task Staff_see_only_their_own_salary_log()   // US-033
     {
         await SetPayAsync();
-        _academic.Counts[Teacher] = 12;
         await _h.RunAsync<ISalaryService>(s => s.GenerateAsync(2026, 9));
 
-        _h.User.As(Teacher, Academy, Roles.Teacher);
+        _h.User.As(Supervisor, Academy, Roles.Supervisor);
         var mine = await _h.RunAsync<ISalaryService, BuildingBlocks.Application.Models.PagedResult<SalaryLogDto>>(s => s.MyLogsAsync(1, 50));
         mine.Items.ShouldNotBeEmpty();
-        mine.Items.ShouldAllBe(l => l.UserId == Teacher);
-        mine.Items.Single().SessionsCount.ShouldBe(12);
+        mine.Items.ShouldAllBe(l => l.UserId == Supervisor);
 
         await Should.ThrowAsync<ForbiddenAccessException>(() =>
             _h.RunAsync<ISalaryService>(s => s.LogsAsync(new SalaryLogQuery())));
@@ -221,6 +216,125 @@ public sealed class FinanceTests : IAsyncLifetime
         paid.PaidAmount.ShouldBe(1000);
     }
 
+    // ---------- Per-session billing and teacher payouts ----------
+
+    private const long StudentC = 22;
+
+    private static DateTime Sep(int day, int hour = 16) => new(2026, 9, day, hour, 0, 0, DateTimeKind.Utc);
+
+    private void Session(long id, long student, DateTime at, string outcome = "Held", string? excuse = null) =>
+        _academic.Ledger.Add(new LedgerSession(id, Teacher, student, at, 30, outcome, outcome is "Held" or "AbsentCounted", excuse, null));
+
+    [Fact]
+    public async Task Sessions_paid_mid_month_are_left_out_of_the_month_end_payout()
+    {
+        await _h.SeedAsync(db =>
+        {
+            db.People.Add(PeopleSeed.Person(Academy, StudentC, "Student C", Roles.Student));
+            return Task.CompletedTask;
+        });
+        await _h.RunAsync<IBillingSetupService>(s => s.SetRateAsync(Teacher, StudentA, new SetTeacherRateRequest(50)));
+        await _h.RunAsync<IBillingSetupService>(s => s.SetRateAsync(Teacher, StudentB, new SetTeacherRateRequest(70)));
+        Session(1, StudentA, Sep(2));
+        Session(2, StudentA, Sep(5));
+        Session(3, StudentA, Sep(10), "AbsentCounted");
+        Session(4, StudentB, Sep(12));
+        Session(5, StudentB, Sep(13), "AbsentNotCounted");
+        Session(6, StudentC, Sep(14));   // no rate yet
+
+        var unpaid = (await _h.RunAsync<ITeacherPayoutService, IReadOnlyList<UnpaidTeacherDto>>(s => s.UnpaidAsync(Teacher))).Single();
+        unpaid.Sessions.Select(s => s.SessionId).ShouldBe([1, 2, 3, 4, 6]);
+        unpaid.Total.ShouldBe(220);
+        unpaid.MissingRates.ShouldBe(1);
+
+        // Day 15: the admin sends money for two sessions.
+        await Should.ThrowAsync<BusinessRuleException>(() => _h.RunAsync<ITeacherPayoutService>(s => s.PayNowAsync(new PayNowRequest(Teacher, [1, 6], null, null))));
+        var interim = await _h.RunAsync<ITeacherPayoutService, PayoutDto>(s => s.PayNowAsync(new PayNowRequest(Teacher, [1, 2], "TRX-15", null)));
+        interim.Status.ShouldBe("Paid");
+        interim.Amount.ShouldBe(100);
+
+        // Last hour of the month in Egypt (UTC+3 in September): the close builds a pending payout for the rest.
+        _h.Clock.Now = new DateTimeOffset(2026, 9, 30, 20, 30, 0, TimeSpan.Zero);
+        AcademyCalendar.IsLastHourOfMonth(_h.Clock.Now.UtcDateTime).ShouldBeTrue();
+        var close = await _h.RunAsync<IMonthCloseService, MonthCloseResultDto>(s => s.CloseAsync(2026, 9));
+        close.Payouts.ShouldBe(1);
+        close.SessionsMissingRates.ShouldBe(1);
+
+        var monthEnd = (await _h.RunAsync<ITeacherPayoutService, IReadOnlyList<PayoutDto>>(s => s.ListAsync(2026, 9))).Single(p => p.Kind == "MonthEnd");
+        monthEnd.Status.ShouldBe("Pending");
+        monthEnd.Amount.ShouldBe(120);
+        (await _h.RunAsync<ITeacherPayoutService, PayoutDto>(s => s.GetAsync(monthEnd.Id))).Lines!.Select(l => l.SessionId).ShouldBe([3, 4]);
+
+        // Once the rate is set, the forgotten session is the only thing left.
+        await _h.RunAsync<IBillingSetupService>(s => s.SetRateAsync(Teacher, StudentC, new SetTeacherRateRequest(60)));
+        var left = (await _h.RunAsync<ITeacherPayoutService, IReadOnlyList<UnpaidTeacherDto>>(s => s.UnpaidAsync(Teacher))).Single();
+        left.Sessions.Select(s => s.SessionId).ShouldBe([6]);
+
+        await _h.RunAsync<ITeacherPayoutService>(s => s.MarkPaidAsync(monthEnd.Id, new MarkPayoutPaidRequest("TRX-30")));
+        var report = await _h.RunAsync<IReportService, FinanceSummaryDto>(s => s.SummaryAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30)));
+        report.Salaries.ShouldBe(220);
+
+        // The teacher sees their own payouts, not the admin screens.
+        _h.User.As(Teacher, Academy, Roles.Teacher);
+        (await _h.RunAsync<ITeacherPayoutService, MyEarningsDto>(s => s.MineAsync())).Payouts.Count.ShouldBe(2);
+        await Should.ThrowAsync<ForbiddenAccessException>(() => _h.RunAsync<ITeacherPayoutService>(s => s.ListAsync(2026, 9)));
+    }
+
+    [Fact]
+    public async Task Postpaid_students_are_invoiced_for_counted_sessions_once()
+    {
+        await _h.RunAsync<IBillingSetupService>(s => s.SaveStudentAsync(StudentA, new SaveStudentBillingRequest(BillingMode.Postpaid, 100, 0, 5)));
+        Session(1, StudentA, Sep(2));
+        Session(2, StudentA, Sep(9));
+        Session(3, StudentA, Sep(16), "AbsentNotCounted");
+        Session(4, StudentA, Sep(23), "AbsentCounted");
+
+        (await _h.RunAsync<IStudentInvoiceService, InvoiceRunDto>(s => s.GenerateAsync(2026, 9))).Created.ShouldBe(1);
+        (await _h.RunAsync<IStudentInvoiceService, InvoiceRunDto>(s => s.GenerateAsync(2026, 9))).ShouldBe(new InvoiceRunDto(0, 0));
+
+        var invoice = (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentA))).Months.Single();
+        invoice.Amount.ShouldBe(300);
+        invoice.DueDate.ShouldBe(new DateOnly(2026, 10, 5));
+
+        // A session held later in the month joins the same invoice.
+        Session(5, StudentA, Sep(28));
+        (await _h.RunAsync<IStudentInvoiceService, InvoiceRunDto>(s => s.GenerateAsync(2026, 9))).Updated.ShouldBe(1);
+        (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentA))).Months.Single().Amount.ShouldBe(400);
+    }
+
+    [Fact]
+    public async Task Prepaid_package_is_invoiced_ahead_with_deductions_and_carried_sessions()
+    {
+        // Saving a prepaid student bills the current month's package at once.
+        await _h.RunAsync<IBillingSetupService>(s => s.SaveStudentAsync(StudentB, new SaveStudentBillingRequest(BillingMode.Prepaid, 80, 8)));
+        (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentB))).Months.Single().Amount.ShouldBe(640);
+
+        Session(1, StudentB, Sep(3));
+        Session(2, StudentB, Sep(7));
+        Session(3, StudentB, Sep(10), "Excused", "DeductedNextMonth");
+        Session(4, StudentB, Sep(14), "Excused", "CarriedOver");
+        Session(5, StudentB, Sep(20), "Excused", "NotCounted");
+
+        var summary = await _h.RunAsync<IBillingSetupService, BillingSummaryDto?>(s => s.SummaryAsync(StudentB));
+        summary!.CountedThisMonth.ShouldBe(2);
+        summary.PackageRemaining.ShouldBe(6);
+
+        await _h.RunAsync<IStudentInvoiceService>(s => s.GenerateAsync(2026, 9));
+        var october = (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentB))).Months
+            .Single(m => m.PeriodStart == new DateOnly(2026, 10, 1));
+        october.Amount.ShouldBe(560);   // 8 × 80, less one deducted session
+
+        // Running it again changes nothing.
+        await _h.RunAsync<IStudentInvoiceService>(s => s.GenerateAsync(2026, 9));
+        (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentB))).Months.Count.ShouldBe(2);
+
+        // In October the carried session tops up the package.
+        _h.Clock.Now = new DateTimeOffset(2026, 10, 5, 10, 0, 0, TimeSpan.Zero);
+        var oct = await _h.RunAsync<IBillingSetupService, BillingSummaryDto?>(s => s.SummaryAsync(StudentB));
+        oct!.CarriedIn.ShouldBe(1);
+        oct.PackageRemaining.ShouldBe(9);
+    }
+
     private async Task SetPayAsync()
     {
         await _h.RunAsync<ICompensationService>(s => s.SetAsync(Teacher, new SetCompensationRequest(PayType.PerSession, 100, new DateOnly(2026, 1, 1), null)));
@@ -230,9 +344,18 @@ public sealed class FinanceTests : IAsyncLifetime
     private sealed class FakeAcademic : IAcademicClient
     {
         public Dictionary<long, int> Counts { get; } = [];
+        public List<LedgerSession> Ledger { get; } = [];
 
         public Task<IReadOnlyList<TeacherSessionCount>> CompletedSessionCountsAsync(long academyId, int year, int month, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<TeacherSessionCount>>(Counts.Select(c => new TeacherSessionCount(c.Key, c.Value)).ToList());
+
+        public Task<IReadOnlyList<LedgerSession>> LedgerAsync(
+            long academyId, DateTime fromUtc, DateTime toUtc, long? teacherUserId = null, long? studentUserId = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<LedgerSession>>(Ledger
+                .Where(l => l.StartsAtUtc >= fromUtc && l.StartsAtUtc < toUtc)
+                .Where(l => teacherUserId == null || l.TeacherUserId == teacherUserId)
+                .Where(l => studentUserId == null || l.StudentUserId == studentUserId)
+                .ToList());
     }
 
     private sealed class TestGateway : IPaymentGateway

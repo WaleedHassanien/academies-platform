@@ -300,11 +300,11 @@ export class ExpensesPage implements OnInit {
     </div>
     @if (summary(); as s) {
       <div class="stats">
-        <app-stat [label]="'finance.revenue' | translate" [value]="(s.revenue | number: '1.0-2') ?? ''" [hint]="('finance.refunds' | translate) + ': ' + (s.refunds | number: '1.0-2')" />
-        <app-stat [label]="'finance.salaries' | translate" [value]="(s.salaries | number: '1.0-2') ?? ''" />
-        <app-stat [label]="'finance.expenses' | translate" [value]="(s.expenses | number: '1.0-2') ?? ''" />
-        <app-stat [label]="'finance.net' | translate" [value]="(s.net | number: '1.0-2') ?? ''" />
-        <app-stat [label]="'finance.outstanding' | translate" [value]="(s.outstanding | number: '1.0-2') ?? ''" />
+        <app-stat icon="trending_up" [label]="'finance.revenue' | translate" [value]="(s.revenue | number: '1.0-2') ?? ''" [hint]="('finance.refunds' | translate) + ': ' + (s.refunds | number: '1.0-2')" />
+        <app-stat icon="account_balance_wallet" [label]="'finance.salaries' | translate" [value]="(s.salaries | number: '1.0-2') ?? ''" />
+        <app-stat icon="shopping_cart" [label]="'finance.expenses' | translate" [value]="(s.expenses | number: '1.0-2') ?? ''" />
+        <app-stat icon="account_balance" [label]="'finance.net' | translate" [value]="(s.net | number: '1.0-2') ?? ''" />
+        <app-stat icon="pending_actions" [label]="'finance.outstanding' | translate" [value]="(s.outstanding | number: '1.0-2') ?? ''" />
       </div>
       <mat-card appearance="outlined" class="panel">
         <mat-card-content><app-bar-chart [labels]="labels()" [series]="series()" /></mat-card-content>
@@ -344,10 +344,10 @@ export class ReportsPage implements OnInit {
   protected readonly series = computed<ChartSeries[]>(() => {
     const m = this.summary()?.monthly ?? [];
     return [
-      { name: this.translate.instant('finance.revenue'), values: m.map((x) => x.revenue), color: '#2e9d5b' },
-      { name: this.translate.instant('finance.salaries'), values: m.map((x) => x.salaries), color: '#e0a100' },
-      { name: this.translate.instant('finance.expenses'), values: m.map((x) => x.expenses), color: '#d64545' },
-      { name: this.translate.instant('finance.net'), values: m.map((x) => x.net), color: '#1e6fd9' },
+      { name: this.translate.instant('finance.revenue'), values: m.map((x) => x.revenue), color: '#10b981' },
+      { name: this.translate.instant('finance.salaries'), values: m.map((x) => x.salaries), color: '#f59e0b' },
+      { name: this.translate.instant('finance.expenses'), values: m.map((x) => x.expenses), color: '#f43f5e' },
+      { name: this.translate.instant('finance.net'), values: m.map((x) => x.net), color: '#6d4aff' },
     ];
   });
 

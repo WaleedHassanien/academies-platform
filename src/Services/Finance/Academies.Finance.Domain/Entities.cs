@@ -221,6 +221,139 @@ public static class SalaryCalculator
     };
 }
 
+// ---------- Per-session billing (one-to-one teaching) ----------
+//
+// Academic says what happened to each one-to-one session (held, absent and counted, excused...).
+// Finance prices it: the student's price per session, and the teacher's rate for that student.
+// Invoice lines and payout lines point at session ids, so a session is billed once and paid once.
+
+public enum BillingMode
+{
+    /// <summary>Pays a monthly package (sessions per month × price) before the month starts.</summary>
+    Prepaid = 1,
+
+    /// <summary>Pays after the month ends, for the sessions that counted.</summary>
+    Postpaid = 2,
+}
+
+public sealed class StudentBilling : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long StudentUserId { get; set; }
+    public BillingMode Mode { get; set; } = BillingMode.Postpaid;
+    public decimal PricePerSession { get; set; }
+
+    /// <summary>Prepaid package size; ignored for postpaid.</summary>
+    public int SessionsPerMonth { get; set; }
+
+    public string Currency { get; set; } = Currencies.Default;
+
+    /// <summary>Day of month invoices fall due (1..28).</summary>
+    public int DueDay { get; set; } = 1;
+
+    /// <summary>The plan that holds this student's monthly invoices (created with the billing).</summary>
+    public long PaymentPlanId { get; set; }
+}
+
+/// <summary>What a teacher earns per session with one particular student.</summary>
+public sealed class TeacherStudentRate : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long TeacherUserId { get; set; }
+    public long StudentUserId { get; set; }
+    public decimal RatePerSession { get; set; }
+}
+
+public enum InvoiceLineKind
+{
+    /// <summary>A postpaid session that counted.</summary>
+    Session = 1,
+
+    /// <summary>A prepaid month's package.</summary>
+    Package = 2,
+
+    /// <summary>Excused sessions carried into this month's package at no charge.</summary>
+    CarriedSessions = 3,
+
+    /// <summary>An excused prepaid session refunded against this month.</summary>
+    Deduction = 4,
+}
+
+/// <summary>What a monthly invoice (a <see cref="StudentPayment"/>) is made of.</summary>
+public sealed class StudentInvoiceLine : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long StudentPaymentId { get; set; }
+    public long StudentUserId { get; set; }
+    public InvoiceLineKind Kind { get; set; }
+
+    /// <summary>The session billed, deducted or carried over; null for a package line.</summary>
+    public long? SessionId { get; set; }
+
+    public DateTime? SessionStartsAtUtc { get; set; }
+    public int Quantity { get; set; } = 1;
+    public decimal UnitPrice { get; set; }
+    public decimal Amount { get; set; }
+}
+
+public enum PayoutKind
+{
+    /// <summary>Sent mid-month for chosen sessions.</summary>
+    Interim = 1,
+
+    /// <summary>Built automatically in the last hour of the month for everything still unpaid.</summary>
+    MonthEnd = 2,
+}
+
+public enum PayoutStatus
+{
+    /// <summary>Calculated, waiting for the admin to confirm the transfer.</summary>
+    Pending = 1,
+    Paid = 2,
+}
+
+/// <summary>Money for a set of sessions sent to a teacher. Its sessions never appear as unpaid again.</summary>
+public sealed class TeacherPayout : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long TeacherUserId { get; set; }
+    public PayoutKind Kind { get; set; }
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public int SessionsCount { get; set; }
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = Currencies.Default;
+    public PayoutStatus Status { get; set; } = PayoutStatus.Pending;
+    public DateTime? PaidOnUtc { get; set; }
+    public long? PaidByUserId { get; set; }
+    public string? Reference { get; set; }
+    public string? Note { get; set; }
+}
+
+public sealed class TeacherPayoutLine : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long TeacherPayoutId { get; set; }
+
+    /// <summary>Unique: a session is paid once.</summary>
+    public long SessionId { get; set; }
+
+    public long StudentUserId { get; set; }
+    public DateTime SessionStartsAtUtc { get; set; }
+    public int DurationMinutes { get; set; }
+    public string Outcome { get; set; } = string.Empty;
+    public decimal Rate { get; set; }
+}
+
+/// <summary>Marks that the month-end close (payouts and invoices) ran for an academy's month.</summary>
+public sealed class MonthClose : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public DateTime ClosedOnUtc { get; set; }
+}
+
 // ---------- Expenses (US-034) ----------
 
 public sealed class Expense : BaseEntity, ITenantEntity

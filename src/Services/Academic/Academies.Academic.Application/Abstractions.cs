@@ -24,6 +24,7 @@ public interface IAcademicDbContext
     DbSet<Session> Sessions { get; }
     DbSet<Attendance> Attendances { get; }
     DbSet<SessionFeedback> Feedbacks { get; }
+    DbSet<SessionExcuse> Excuses { get; }
     DbSet<Assignment> Assignments { get; }
     DbSet<AssignmentSubmission> Submissions { get; }
     DbSet<Certificate> Certificates { get; }
@@ -33,10 +34,27 @@ public interface IAcademicDbContext
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 
-/// <summary>Creates a join link for an online session (US-037).</summary>
+/// <summary>Who is joining an online session: the teacher (and staff) join as moderator.</summary>
+public sealed record MeetingParticipant(long UserId, string Name, string Email, bool IsModerator);
+
+/// <summary>
+/// Online-session rooms (US-037). Every teacher has one permanent room of their own, so two
+/// teachers never share a room even at the same hour; a teacher can't hold two sessions at once.
+/// </summary>
 public interface IMeetingLinkGenerator
 {
-    string Generate(long academyId, string title, DateTime startsAtUtc);
+    /// <summary>The teacher's room link, stored on their online sessions (no personal token in it).</summary>
+    string RoomUrl(long academyId, long teacherUserId);
+
+    /// <summary>Whether a session's link is one of our rooms (rather than an external link typed in by hand).</summary>
+    bool IsOurRoom(string meetingUrl);
+
+    /// <summary>
+    /// A personal link into the teacher's room. With a Jitsi token provider (JaaS or a self-hosted
+    /// server) it carries a signed token with the person's name and email, so nobody logs in to Jitsi
+    /// and the teacher opens their room as moderator. The token only works between the two times.
+    /// </summary>
+    string JoinUrl(long academyId, long teacherUserId, MeetingParticipant participant, DateTime notBeforeUtc, DateTime expiresAtUtc);
 }
 
 public sealed record CertificateDocument(string StudentName, string CourseName, string Number, DateTime IssuedOnUtc, string AcademyName);

@@ -266,6 +266,92 @@ public sealed class SalariesController(ICompensationService compensations, ISala
             : throw new BusinessRuleException("Month must look like 2026-09.");
 }
 
+/// <summary>Per-session billing: student prices, teacher rates, invoices and the month-end close.</summary>
+[ApiController]
+[Authorize]
+public sealed class BillingController(IBillingSetupService setup, IStudentInvoiceService invoices, IMonthCloseService close) : ControllerBase
+{
+    [HttpGet("students/{userId:long}/billing")]
+    [HasPermission(Permissions.Payments.View)]
+    public async Task<ActionResult<ApiResponse<StudentBillingDto?>>> Get(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<StudentBillingDto?>.Ok(await setup.GetStudentAsync(userId, ct)));
+
+    [HttpPut("students/{userId:long}/billing")]
+    [HasPermission(Permissions.Payments.Manage)]
+    public async Task<ActionResult<ApiResponse<StudentBillingDto>>> Save(long userId, SaveStudentBillingRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<StudentBillingDto>.Ok(await setup.SaveStudentAsync(userId, request, ct)));
+
+    /// <summary>This month: sessions that counted, package left (prepaid) or amount so far (postpaid), balance due.</summary>
+    [HttpGet("students/{userId:long}/billing/summary")]
+    [HasPermission(Permissions.Payments.View)]
+    public async Task<ActionResult<ApiResponse<BillingSummaryDto?>>> Summary(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<BillingSummaryDto?>.Ok(await setup.SummaryAsync(userId, ct)));
+
+    [HttpGet("teacher-rates")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<TeacherRateDto>>>> Rates([FromQuery] long? teacherUserId, [FromQuery] long? studentUserId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<TeacherRateDto>>.Ok(await setup.RatesAsync(teacherUserId, studentUserId, ct)));
+
+    [HttpPut("teachers/{teacherUserId:long}/rates/{studentUserId:long}")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<TeacherRateDto>>> SetRate(long teacherUserId, long studentUserId, SetTeacherRateRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<TeacherRateDto>.Ok(await setup.SetRateAsync(teacherUserId, studentUserId, request, ct)));
+
+    /// <summary>POST /invoices/generate?year=2026&amp;month=9 — postpaid for that month, prepaid for the next.</summary>
+    [HttpPost("invoices/generate")]
+    [HasPermission(Permissions.Payments.Manage)]
+    public async Task<ActionResult<ApiResponse<InvoiceRunDto>>> GenerateInvoices([FromQuery] int year, [FromQuery] int month, CancellationToken ct) =>
+        Ok(ApiResponse<InvoiceRunDto>.Ok(await invoices.GenerateAsync(year, month, ct)));
+
+    /// <summary>Runs the month-end close now (it also runs by itself in the month's last hour, Egypt time).</summary>
+    [HttpPost("month-close")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<MonthCloseResultDto>>> Close([FromQuery] int year, [FromQuery] int month, CancellationToken ct) =>
+        Ok(ApiResponse<MonthCloseResultDto>.Ok(await close.CloseAsync(year, month, ct)));
+}
+
+/// <summary>Teacher payouts: unpaid sessions, paying now for chosen sessions, month-end payouts and confirming transfers.</summary>
+[ApiController]
+[Authorize]
+public sealed class PayoutsController(ITeacherPayoutService payouts) : ControllerBase
+{
+    [HttpGet("payouts/unpaid")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<UnpaidTeacherDto>>>> Unpaid([FromQuery] long? teacherUserId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<UnpaidTeacherDto>>.Ok(await payouts.UnpaidAsync(teacherUserId, null, ct)));
+
+    [HttpPost("payouts/pay-now")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<PayoutDto>>> PayNow(PayNowRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<PayoutDto>.Ok(await payouts.PayNowAsync(request, ct)));
+
+    [HttpPost("payouts/generate")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<PayoutDto>>>> Generate([FromQuery] int year, [FromQuery] int month, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<PayoutDto>>.Ok(await payouts.GenerateMonthEndAsync(year, month, ct)));
+
+    [HttpGet("payouts")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<PayoutDto>>>> List([FromQuery] int year, [FromQuery] int month, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<PayoutDto>>.Ok(await payouts.ListAsync(year, month, ct)));
+
+    [HttpGet("payouts/{id:long}")]
+    [HasPermission(Permissions.Salaries.View)]
+    public async Task<ActionResult<ApiResponse<PayoutDto>>> Get(long id, CancellationToken ct) =>
+        Ok(ApiResponse<PayoutDto>.Ok(await payouts.GetAsync(id, ct)));
+
+    [HttpPost("payouts/{id:long}/mark-paid")]
+    [HasPermission(Permissions.Salaries.Manage)]
+    public async Task<ActionResult<ApiResponse<PayoutDto>>> MarkPaid(long id, MarkPayoutPaidRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<PayoutDto>.Ok(await payouts.MarkPaidAsync(id, request, ct)));
+
+    /// <summary>A teacher's own earnings: unpaid sessions so far and past payouts.</summary>
+    [HttpGet("me/earnings")]
+    [HasPermission(Permissions.Salaries.View)]
+    public async Task<ActionResult<ApiResponse<MyEarningsDto>>> Mine(CancellationToken ct) =>
+        Ok(ApiResponse<MyEarningsDto>.Ok(await payouts.MineAsync(ct)));
+}
+
 /// <summary>Expenses and the profit report (US-034).</summary>
 [ApiController]
 [Authorize]

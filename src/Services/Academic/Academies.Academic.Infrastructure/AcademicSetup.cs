@@ -32,7 +32,8 @@ public static class DependencyInjection
         services.AddPlatformAudit();
         services.AddEntitlements(configuration);
 
-        services.AddSingleton<IMeetingLinkGenerator>(new JitsiMeetingLinkGenerator(configuration["Meetings:BaseUrl"] ?? "https://meet.jit.si"));
+        var meetings = configuration.GetSection(MeetingOptions.Section).Get<MeetingOptions>() ?? new MeetingOptions();
+        services.AddSingleton<IMeetingLinkGenerator>(new JitsiMeetingLinkGenerator(meetings));
         services.AddSingleton<ICertificateRenderer, QuestPdfCertificateRenderer>();
 
         if (configuration.GetValue("Jobs:Enabled", true))
@@ -42,17 +43,6 @@ public static class DependencyInjection
 
         return services;
     }
-}
-
-/// <summary>
-/// Online-session links (US-037) on Jitsi Meet, which needs no account or API key. Room names
-/// are unguessable. To use Zoom or Google Meet, implement <see cref="IMeetingLinkGenerator"/>
-/// with their OAuth APIs and register it instead.
-/// </summary>
-internal sealed class JitsiMeetingLinkGenerator(string baseUrl) : IMeetingLinkGenerator
-{
-    public string Generate(long academyId, string title, DateTime startsAtUtc) =>
-        $"{baseUrl.TrimEnd('/')}/academy{academyId}-{startsAtUtc:yyyyMMddHHmm}-{Guid.NewGuid():N}";
 }
 
 /// <summary>

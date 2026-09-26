@@ -1,75 +1,64 @@
 import { Component, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { Router, RouterLink } from '@angular/router';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { apiErrorMessage } from '../../core/api/api.models';
 import { AuthService } from '../../core/auth/auth.service';
+import { AuthLayout } from '../../shared/auth-layout';
 
 /** Two steps: request a code by email, then set a new password with it (US-012). */
 @Component({
   selector: 'app-forgot-password',
-  imports: [
-    ReactiveFormsModule,
-    RouterLink,
-    TranslatePipe,
-    MatCardModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatButtonModule,
-    MatProgressBarModule,
-  ],
+  imports: [ReactiveFormsModule, RouterLink, TranslatePipe, MatFormFieldModule, MatInputModule, MatButtonModule, MatIconModule, AuthLayout],
   template: `
-    <div class="auth-page">
-      <mat-card appearance="outlined">
-        @if (busy()) {
-          <mat-progress-bar mode="indeterminate" />
-        }
-        <mat-card-header>
-          <mat-card-title>{{ 'auth.resetTitle' | translate }}</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
-          @if (step() === 'request') {
-            <form [formGroup]="requestForm" (ngSubmit)="requestCode()">
-              <p>{{ 'auth.resetHint' | translate }}</p>
-              <mat-form-field appearance="outline">
-                <mat-label>{{ 'auth.email' | translate }}</mat-label>
-                <input matInput type="email" formControlName="email" dir="ltr" />
-              </mat-form-field>
-              <button mat-flat-button type="submit" [disabled]="requestForm.invalid || busy()">
-                {{ 'auth.sendCode' | translate }}
-              </button>
-            </form>
-          } @else {
-            <form [formGroup]="resetForm" (ngSubmit)="reset()">
-              <p>{{ 'auth.codeSent' | translate }}</p>
-              <mat-form-field appearance="outline">
-                <mat-label>{{ 'auth.code' | translate }}</mat-label>
-                <input matInput formControlName="code" inputmode="numeric" maxlength="6" dir="ltr" />
-              </mat-form-field>
-              <mat-form-field appearance="outline">
-                <mat-label>{{ 'auth.newPassword' | translate }}</mat-label>
-                <input matInput type="password" formControlName="newPassword" autocomplete="new-password" dir="ltr" />
-                <mat-hint>{{ 'auth.passwordRules' | translate }}</mat-hint>
-              </mat-form-field>
-              @if (error()) {
-                <p class="form-error" role="alert">{{ error() }}</p>
-              }
-              <button mat-flat-button type="submit" [disabled]="resetForm.invalid || busy()">
-                {{ 'auth.resetPassword' | translate }}
-              </button>
-            </form>
+    <app-auth-layout [title]="'auth.resetTitle' | translate"
+                     [subtitle]="(step() === 'request' ? 'auth.resetHint' : 'auth.codeSent') | translate" [busy]="busy()">
+      @if (step() === 'request') {
+        <form class="auth-form" [formGroup]="requestForm" (ngSubmit)="requestCode()">
+          <mat-form-field>
+            <mat-label>{{ 'auth.email' | translate }}</mat-label>
+            <mat-icon matPrefix>mail</mat-icon>
+            <input matInput type="email" formControlName="email" dir="ltr" />
+          </mat-form-field>
+          <button mat-flat-button class="submit" type="submit" [disabled]="requestForm.invalid || busy()">
+            {{ 'auth.sendCode' | translate }}
+          </button>
+        </form>
+      } @else {
+        <form class="auth-form" [formGroup]="resetForm" (ngSubmit)="reset()">
+          <mat-form-field>
+            <mat-label>{{ 'auth.code' | translate }}</mat-label>
+            <mat-icon matPrefix>pin</mat-icon>
+            <input matInput formControlName="code" inputmode="numeric" maxlength="6" dir="ltr" />
+          </mat-form-field>
+          <mat-form-field>
+            <mat-label>{{ 'auth.newPassword' | translate }}</mat-label>
+            <mat-icon matPrefix>lock</mat-icon>
+            <input matInput type="password" formControlName="newPassword" autocomplete="new-password" dir="ltr" />
+            <mat-hint>{{ 'auth.passwordRules' | translate }}</mat-hint>
+          </mat-form-field>
+          @if (error()) {
+            <p class="form-error" role="alert"><mat-icon>error</mat-icon>{{ error() }}</p>
           }
-        </mat-card-content>
-        <mat-card-actions align="end">
-          <a mat-button routerLink="/login">{{ 'auth.backToLogin' | translate }}</a>
-        </mat-card-actions>
-      </mat-card>
-    </div>
+          <button mat-flat-button class="submit" type="submit" [disabled]="resetForm.invalid || busy()">
+            {{ 'auth.resetPassword' | translate }}
+          </button>
+        </form>
+      }
+      <a class="back" routerLink="/login"><mat-icon class="flip">arrow_back</mat-icon>{{ 'auth.backToLogin' | translate }}</a>
+    </app-auth-layout>
+  `,
+  styles: `
+    .auth-form { display: flex; flex-direction: column; gap: 16px; }
+    .auth-form mat-icon[matPrefix] { color: var(--app-muted); }
+    .submit { height: 48px; font-size: 1rem; }
+    .back { display: inline-flex; align-items: center; gap: 6px; margin-top: 20px; text-decoration: none; font-weight: 500; font-size: 0.9rem; }
+    .back mat-icon { font-size: 18px; width: 18px; height: 18px; }
+    :host-context([dir='rtl']) .flip { transform: scaleX(-1); }
   `,
 })
 export class ForgotPasswordPage {

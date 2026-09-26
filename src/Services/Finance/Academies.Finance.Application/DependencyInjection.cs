@@ -20,6 +20,10 @@ public static class DependencyInjection
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IPaymentReminderService, PaymentReminderService>();
         services.AddScoped<IGuardianSync, GuardianSync>();
+        services.AddScoped<IStudentInvoiceService, StudentInvoiceService>();
+        services.AddScoped<IBillingSetupService, BillingSetupService>();
+        services.AddScoped<ITeacherPayoutService, TeacherPayoutService>();
+        services.AddScoped<IMonthCloseService, MonthCloseService>();
         return services;
     }
 }

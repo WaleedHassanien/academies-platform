@@ -16,9 +16,13 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import { TranslatePipe } from '@ngx-translate/core';
+import { DataTable } from './data-table';
+import { UtcDatePipe } from './utc-date.pipe';
 
 /** What almost every page imports: forms, pipes, translation and the Material widgets we use. */
 export const PAGE_IMPORTS = [
+  DataTable,
+  UtcDatePipe,
   ReactiveFormsModule,
   FormsModule,
   RouterLink,

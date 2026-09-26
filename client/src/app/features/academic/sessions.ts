@@ -1,17 +1,22 @@
 import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Api, ApiService } from '../../core/api/api.service';
-import { CourseDto, GroupDto, RosterItemDto, SessionDto, StaffProfileDto } from '../../core/api/models';
+import { PagedResult } from '../../core/api/api.models';
+import { CourseDto, GroupDto, RosterItemDto, SessionDto, StaffProfileDto, StudentDto } from '../../core/api/models';
 import { AuthService } from '../../core/auth/auth.service';
 import { Permissions, Roles } from '../../core/auth/permissions';
 import { addDays, isoDate, Notifier } from '../../shared/notifier';
 import { PAGE_IMPORTS } from '../../shared/page-imports';
+import { canBeExcused, OutcomeChip, SessionActions, startOfWeek } from '../../shared/sessions-kit';
+import { parseUtc } from '../../shared/time-zones';
 
 interface SessionForm {
   id: number | null;
   title: string;
   courseId: number | null;
   groupId: number | null;
+  /** Set for a one-to-one session. */
+  studentUserId: number | null;
   teacherUserId: number | null;
   date: string;
   time: string;
@@ -24,16 +29,10 @@ interface SessionForm {
   repeatWeeks: number;
 }
 
-function startOfWeek(date: Date): Date {
-  // Academy weeks start on Saturday.
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return addDays(d, -((d.getDay() + 1) % 7));
-}
-
 /** Weekly timetable with scheduling, clash detection and online links (US-025, US-037). */
 @Component({
   selector: 'app-sessions',
-  imports: [PAGE_IMPORTS],
+  imports: [PAGE_IMPORTS, OutcomeChip],
   template: `
     <div class="page-header">
       <h1>{{ 'nav.sessions' | translate }}</h1>
@@ -44,6 +43,14 @@ function startOfWeek(date: Date): Date {
       <mat-card appearance="outlined" class="panel">
         <mat-card-content>
           <div class="form-grid">
+            <mat-form-field>
+              <mat-label>{{ 'sessions.student' | translate }}</mat-label>
+              <mat-select [(ngModel)]="f.studentUserId" (selectionChange)="onStudent(f)">
+                <mat-option [value]="null">{{ 'sessions.groupSession' | translate }}</mat-option>
+                @for (st of students(); track st.userId) { <mat-option [value]="st.userId">{{ st.fullName }}</mat-option> }
+              </mat-select>
+              <mat-hint>{{ 'sessions.studentHint' | translate }}</mat-hint>
+            </mat-form-field>
             <mat-form-field><mat-label>{{ 'common.title' | translate }}</mat-label><input matInput [(ngModel)]="f.title" /></mat-form-field>
             <mat-form-field>
               <mat-label>{{ 'nav.courses' | translate }}</mat-label>
@@ -51,7 +58,7 @@ function startOfWeek(date: Date): Date {
             </mat-form-field>
             <mat-form-field>
               <mat-label>{{ 'nav.groups' | translate }}</mat-label>
-              <mat-select [(ngModel)]="f.groupId"><mat-option [value]="null">—</mat-option>@for (g of groups(); track g.id) { <mat-option [value]="g.id">{{ g.name }}</mat-option> }</mat-select>
+              <mat-select [(ngModel)]="f.groupId" [disabled]="!!f.studentUserId"><mat-option [value]="null">—</mat-option>@for (g of groups(); track g.id) { <mat-option [value]="g.id">{{ g.name }}</mat-option> }</mat-select>
             </mat-form-field>
             <mat-form-field>
               <mat-label>{{ 'roles.Teacher' | translate }}</mat-label>
@@ -106,20 +113,35 @@ function startOfWeek(date: Date): Date {
           <tbody>
             @for (s of day.sessions; track s.id) {
               <tr>
-                <td class="ltr" style="width: 110px">{{ s.startsAtUtc | date: 'HH:mm' }} – {{ s.endsAtUtc | date: 'HH:mm' }}</td>
-                <td><b>{{ s.title }}</b><div class="muted">{{ s.courseName }} · {{ s.groupName ?? '—' }} · {{ s.teacherName }}</div></td>
+                <td class="ltr" style="width: 110px">{{ s.startsAtUtc | utcDate: 'HH:mm' }} – {{ s.endsAtUtc | utcDate: 'HH:mm' }}</td>
+                <td><b>{{ s.title }}</b><div class="muted">{{ s.studentName ?? s.groupName ?? '—' }} · {{ s.courseName }} · {{ s.teacherName }}</div></td>
                 <td>
                   @if (s.type === 'Online') {
-                    @if (s.meetingUrl) { <a mat-button [href]="s.meetingUrl" target="_blank" rel="noopener"><mat-icon>videocam</mat-icon>{{ 'sessions.join' | translate }}</a> }
+                    @if (s.meetingUrl && s.status === 'Scheduled') { <button mat-button (click)="actions.join(s)"><mat-icon>videocam</mat-icon>{{ 'sessions.join' | translate }}</button> }
                   } @else { {{ s.location }} }
                 </td>
-                <td><span class="status" [class]="s.status">{{ 'status.' + s.status | translate }}</span></td>
+                <td><app-outcome [session]="s" /></td>
                 <td class="actions">
-                  @if (canRun(s)) {
+                  @if (canDecide && s.excuse?.status === 'Pending') {
+                    <button mat-flat-button (click)="resolve(s)"><mat-icon>gavel</mat-icon>{{ 'requests.decide' | translate }}</button>
+                  }
+                  @if (canDecide && s.attendanceStatus === 'Absent' && s.absenceCounted === null && s.studentUserId) {
+                    <button mat-stroked-button [matMenuTriggerFor]="absence"><mat-icon>person_off</mat-icon>{{ 'requests.decide' | translate }}</button>
+                    <mat-menu #absence="matMenu">
+                      <button mat-menu-item (click)="decideAbsence(s, true)"><mat-icon>check</mat-icon>{{ 'requests.counts' | translate }}</button>
+                      <button mat-menu-item (click)="decideAbsence(s, false)"><mat-icon>block</mat-icon>{{ 'requests.notCounted' | translate }}</button>
+                    </mat-menu>
+                  }
+                  @if (canRun(s) && s.status !== 'Excused') {
                     <button mat-button (click)="open(s)">{{ 'sessions.attendance' | translate }}</button>
+                  }
+                  @if (canRun(s) || canBeExcused(s)) {
                     <button mat-icon-button [matMenuTriggerFor]="menu"><mat-icon>more_vert</mat-icon></button>
                     <mat-menu #menu="matMenu">
-                      @if (s.status === 'Scheduled') {
+                      @if (canBeExcused(s)) {
+                        <button mat-menu-item (click)="excuse(s)"><mat-icon>event_busy</mat-icon>{{ 'excuse.action' | translate }}</button>
+                      }
+                      @if (canRun(s) && s.status === 'Scheduled') {
                         <button mat-menu-item (click)="edit(s)">{{ 'common.edit' | translate }}</button>
                         <button mat-menu-item (click)="act(s, 'complete')">{{ 'sessions.complete' | translate }}</button>
                         <button mat-menu-item (click)="act(s, 'meeting-link')">{{ 'sessions.generateLink' | translate }}</button>
@@ -146,6 +168,11 @@ export class SessionsPage implements OnInit {
 
   protected readonly isStaff = this.auth.hasPermission(Permissions.sessions.manage);
   protected readonly canSchedule = this.isStaff || this.auth.hasAnyRole(Roles.Teacher);
+  /** Settle excuses and unexcused absences: staff, or supervisors for their teachers (the server checks which). */
+  protected readonly canDecide = this.isStaff || this.auth.hasAnyRole(Roles.Admin, Roles.Manager, Roles.Supervisor);
+  protected readonly canBeExcused = canBeExcused;
+  protected readonly actions = inject(SessionActions);
+  protected readonly students = signal<StudentDto[]>([]);
   protected readonly rtl = () => document.documentElement.dir === 'rtl';
 
   protected readonly sessions = signal<SessionDto[]>([]);
@@ -160,7 +187,7 @@ export class SessionsPage implements OnInit {
   protected readonly days = computed(() => {
     const byDay = new Map<string, SessionDto[]>();
     for (const s of this.sessions()) {
-      const key = isoDate(new Date(s.startsAtUtc));
+      const key = isoDate(parseUtc(s.startsAtUtc));
       byDay.set(key, [...(byDay.get(key) ?? []), s]);
     }
     return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, sessions]) => ({ date, sessions }));
@@ -171,6 +198,41 @@ export class SessionsPage implements OnInit {
     this.api.get<CourseDto[]>(`${Api.academic}/courses`).subscribe((c) => this.courses.set(c));
     this.api.get<GroupDto[]>(`${Api.academic}/groups`).subscribe((g) => this.groups.set(g));
     this.api.get<StaffProfileDto[]>(`${Api.academic}/teachers`).subscribe((t) => this.teachers.set(t));
+    if (this.canSchedule) {
+      this.api.get<PagedResult<StudentDto>>(`${Api.academic}/students`, { pageSize: 100, status: 'Active' }).subscribe((r) => this.students.set(r.items));
+    }
+  }
+
+  /** Picking a student makes it one-to-one: their teacher and usual length are filled in. */
+  protected onStudent(f: SessionForm): void {
+    const student = this.students().find((s) => s.userId === f.studentUserId);
+    if (!student) {
+      return;
+    }
+    f.groupId = null;
+    f.durationMinutes = student.sessionMinutes;
+    f.title ||= student.fullName;
+    if (this.isStaff && student.teachers.length) {
+      f.teacherUserId = student.teachers[0].userId;
+    }
+  }
+
+  protected excuse(s: SessionDto): void {
+    this.actions.excuse(s).subscribe(() => this.load());
+  }
+
+  protected resolve(s: SessionDto): void {
+    this.actions.resolve(s.excuse!, s).subscribe({ next: () => this.load(), error: (e) => this.notify.error(e) });
+  }
+
+  protected decideAbsence(s: SessionDto, counted: boolean): void {
+    this.actions.decideAbsence(s, counted).subscribe({
+      next: () => {
+        this.notify.saved();
+        this.load();
+      },
+      error: (e) => this.notify.error(e),
+    });
   }
 
   protected shift(days: number): void {
@@ -200,23 +262,23 @@ export class SessionsPage implements OnInit {
   protected edit(s: SessionDto | null): void {
     const me = this.auth.user()?.id ?? null;
     if (s) {
-      const start = new Date(s.startsAtUtc);
+      const start = parseUtc(s.startsAtUtc);
       this.form.set({
-        id: s.id, title: s.title, courseId: s.courseId, groupId: s.groupId, teacherUserId: s.teacherUserId, date: isoDate(start),
-        time: start.toTimeString().slice(0, 5), durationMinutes: (new Date(s.endsAtUtc).getTime() - start.getTime()) / 60000, type: s.type,
+        id: s.id, title: s.title, courseId: s.courseId, groupId: s.groupId, studentUserId: s.studentUserId, teacherUserId: s.teacherUserId, date: isoDate(start),
+        time: start.toTimeString().slice(0, 5), durationMinutes: s.durationMinutes, type: s.type,
         location: s.location ?? '', meetingUrl: s.meetingUrl ?? '', generateMeetingLink: false, notes: s.notes ?? '', repeatWeeks: 1,
       });
     } else {
       this.form.set({
-        id: null, title: '', courseId: null, groupId: null, teacherUserId: this.isStaff ? null : me, date: isoDate(new Date()), time: '16:00',
-        durationMinutes: 60, type: 'Offline', location: '', meetingUrl: '', generateMeetingLink: true, notes: '', repeatWeeks: 1,
+        id: null, title: '', courseId: this.courses()[0]?.id ?? null, groupId: null, studentUserId: null, teacherUserId: this.isStaff ? null : me,
+        date: isoDate(new Date()), time: '16:00', durationMinutes: 30, type: 'Online', location: '', meetingUrl: '', generateMeetingLink: true, notes: '', repeatWeeks: 1,
       });
     }
   }
 
   protected save(f: SessionForm): void {
     const body = {
-      title: f.title, courseId: f.courseId, groupId: f.groupId, teacherUserId: f.teacherUserId,
+      title: f.title, courseId: f.courseId, groupId: f.studentUserId ? null : f.groupId, studentUserId: f.studentUserId, teacherUserId: f.teacherUserId,
       startsAtUtc: new Date(`${f.date}T${f.time}`).toISOString(), durationMinutes: f.durationMinutes, type: f.type,
       location: f.location || null, meetingUrl: f.meetingUrl || null, generateMeetingLink: f.generateMeetingLink,
       notes: f.notes || null, repeatWeeks: f.repeatWeeks,
@@ -257,7 +319,7 @@ interface RosterRow extends RosterItemDto {
       <div class="page-header">
         <div>
           <h1>{{ s.title }}</h1>
-          <p class="muted">{{ s.startsAtUtc | date: 'EEEE d MMM, HH:mm' }} · {{ s.courseName }} · {{ s.groupName ?? '—' }} · {{ s.teacherName }}</p>
+          <p class="muted">{{ s.startsAtUtc | utcDate: 'EEEE d MMM, HH:mm' }} · {{ s.courseName }} · {{ s.studentName ?? s.groupName ?? '—' }} · {{ s.teacherName }}</p>
         </div>
         <div>
           <span class="status" [class]="s.status">{{ 'status.' + s.status | translate }}</span>

@@ -49,11 +49,13 @@ export const routes: Routes = [
 
       // ---- Academic ----
       { path: 'students', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => import('./features/academic/students').then((m) => m.StudentsPage) },
+      { path: 'students/:id', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => import('./features/academic/student-detail').then((m) => m.StudentDetailPage) },
       { path: 'staff', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => import('./features/academic/staff').then((m) => m.StaffPage) },
       { path: 'groups', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => academic().then((m) => m.GroupsPage) },
       { path: 'courses', canActivate: [permissionGuard(Permissions.courses.view)], loadComponent: () => academic().then((m) => m.CoursesPage) },
       { path: 'sessions', canActivate: [permissionGuard(Permissions.sessions.view)], loadComponent: () => sessions().then((m) => m.SessionsPage) },
       { path: 'sessions/:id', canActivate: [permissionGuard(Permissions.sessions.view)], loadComponent: () => sessions().then((m) => m.SessionDetailPage) },
+      { path: 'requests', canActivate: [permissionGuard(Permissions.sessions.view)], loadComponent: () => import('./features/academic/requests').then((m) => m.RequestsPage) },
       { path: 'assignments', canActivate: [permissionGuard(Permissions.courses.view)], loadComponent: () => learning().then((m) => m.AssignmentsPage) },
       { path: 'certificates', canActivate: [permissionGuard(Permissions.courses.view)], loadComponent: () => learning().then((m) => m.CertificatesPage) },
 
@@ -62,6 +64,7 @@ export const routes: Routes = [
       { path: 'payment-logs', canActivate: [permissionGuard(Permissions.payments.view)], loadComponent: () => payments().then((m) => m.PaymentLogsPage) },
       { path: 'pay', canActivate: [permissionGuard(Permissions.salaries.manage)], loadComponent: () => salaries().then((m) => m.CompensationPage) },
       { path: 'salaries', canActivate: [permissionGuard(Permissions.salaries.manage)], loadComponent: () => salaries().then((m) => m.SalariesPage) },
+      { path: 'payouts', canActivate: [permissionGuard(Permissions.salaries.manage)], loadComponent: () => import('./features/finance/payouts').then((m) => m.PayoutsPage) },
       { path: 'expenses', canActivate: [permissionGuard(Permissions.expenses.manage)], loadComponent: () => salaries().then((m) => m.ExpensesPage) },
       { path: 'reports', canActivate: [permissionGuard(Permissions.reports.view)], loadComponent: () => salaries().then((m) => m.ReportsPage) },
     ],

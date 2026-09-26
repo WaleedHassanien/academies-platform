@@ -1,17 +1,117 @@
 @use '@angular/material' as mat;
 
+/* ======================================================================
+   Theme
+   Light and dark come from the same tokens: Material emits light-dark()
+   values, so flipping `color-scheme` on <html> (ThemeService) swaps them.
+   ====================================================================== */
 html {
   color-scheme: light;
   @include mat.theme(
     (
       color: (
-        primary: mat.$azure-palette,
-        tertiary: mat.$blue-palette,
+        primary: mat.$violet-palette,
+        tertiary: mat.$cyan-palette,
       ),
-      typography: Cairo,
+      typography: (
+        plain-family: "Inter, 'IBM Plex Sans Arabic', system-ui, sans-serif",
+        brand-family: "Inter, 'IBM Plex Sans Arabic', system-ui, sans-serif",
+        bold-weight: 700,
+        medium-weight: 500,
+        regular-weight: 400,
+      ),
       density: 0,
     )
   );
+
+  @include mat.theme-overrides(
+    (
+      surface: light-dark(#ffffff, #151823),
+      surface-container-lowest: light-dark(#ffffff, #10131c),
+      surface-container-low: light-dark(#f7f7fc, #181b27),
+      surface-container: light-dark(#f2f2fa, #1d2030),
+      surface-container-high: light-dark(#ececf6, #23273a),
+      surface-container-highest: light-dark(#e6e6f2, #2a2e43),
+      outline-variant: light-dark(#e4e4ef, #2c3044),
+    )
+  );
+
+  @include mat.card-overrides(
+    (
+      outlined-container-shape: 18px,
+      elevated-container-shape: 18px,
+      filled-container-shape: 18px,
+      outlined-outline-color: var(--app-border),
+      title-text-size: 1.05rem,
+      title-text-weight: 600,
+      subtitle-text-size: 0.85rem,
+    )
+  );
+  @include mat.button-overrides(
+    (
+      filled-container-shape: 12px,
+      outlined-container-shape: 12px,
+      protected-container-shape: 12px,
+      text-container-shape: 10px,
+      filled-horizontal-padding: 20px,
+      outlined-horizontal-padding: 20px,
+    )
+  );
+  @include mat.form-field-overrides(
+    (
+      outlined-container-shape: 12px,
+      outlined-outline-color: var(--app-border-strong),
+    )
+  );
+  @include mat.menu-overrides((container-shape: 14px));
+  @include mat.dialog-overrides((container-shape: 20px));
+  @include mat.snack-bar-overrides((container-shape: 12px));
+  @include mat.tooltip-overrides((container-shape: 8px));
+  @include mat.sidenav-overrides(
+    (
+      container-shape: 0,
+      container-divider-color: transparent,
+      container-background-color: var(--app-surface),
+      content-background-color: transparent,
+    )
+  );
+
+  /* App-level design tokens. */
+  --app-bg: light-dark(#f5f6fb, #0d0f17);
+  --app-surface: light-dark(#ffffff, #151823);
+  --app-surface-2: light-dark(#f7f7fc, #1b1e2c);
+  --app-border: light-dark(#e8e8f1, #262a3c);
+  --app-border-strong: light-dark(#d5d5e3, #363b52);
+  --app-muted: light-dark(#6b6b80, #9a9cb3);
+  --app-radius: 18px;
+  --app-radius-sm: 12px;
+  --app-shadow: light-dark(0 1px 2px rgb(20 20 50 / 4%), 0 1px 2px rgb(0 0 0 / 30%)),
+    light-dark(0 8px 24px -8px rgb(40 30 110 / 10%), 0 8px 24px -8px rgb(0 0 0 / 50%));
+  --app-shadow-lg: light-dark(0 24px 48px -16px rgb(40 30 110 / 22%), 0 24px 48px -16px rgb(0 0 0 / 60%));
+  --app-gradient: linear-gradient(135deg, #7c3aed 0%, #4f46e5 50%, #0ea5e9 100%);
+  --app-nav-width: 272px;
+  --app-rail-width: 80px;
+  --app-topbar-height: 64px;
+
+  --tone-violet: #7c3aed;
+  --tone-blue: #2563eb;
+  --tone-green: #059669;
+  --tone-amber: #d97706;
+  --tone-rose: #e11d48;
+  --tone-cyan: #0891b2;
+
+  --ok-bg: light-dark(#e3f8ee, #0f2e22);
+  --ok-fg: light-dark(#0b7a4b, #5eeaa8);
+  --warn-bg: light-dark(#fff4dc, #33270c);
+  --warn-fg: light-dark(#9a6200, #fbc85a);
+  --bad-bg: light-dark(#ffe8ea, #3a1519);
+  --bad-fg: light-dark(#b4232f, #ff8f99);
+  --info-bg: light-dark(#e8efff, #152044);
+  --info-fg: light-dark(#2b54c9, #9db6ff);
+}
+
+html.dark-theme {
+  color-scheme: dark;
 }
 
 html,
@@ -21,144 +121,247 @@ body {
 }
 
 body {
-  font-family: Cairo, Roboto, 'Helvetica Neue', sans-serif;
-  background: var(--mat-sys-surface-container-low);
+  font-family: Inter, 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  background: var(--app-bg);
   color: var(--mat-sys-on-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .app-root {
   height: 100%;
 }
 
-mat-icon {
-  font-family: 'Material Symbols Outlined';
+.mat-icon.material-symbols-rounded {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
-/* Centered card for the unauthenticated pages (login, reset). */
-.auth-page {
-  min-height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  box-sizing: border-box;
-
-  mat-card {
-    width: 100%;
-    max-width: 420px;
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
+::selection {
+  background: color-mix(in srgb, var(--mat-sys-primary) 25%, transparent);
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-border-strong) transparent;
+}
+
+a {
+  color: var(--mat-sys-primary);
+}
+
+/* ======================================================================
+   Auth pages (login, reset): see shared/auth-layout.ts
+   ====================================================================== */
 .form-error {
-  color: var(--mat-sys-error);
-  margin: 0 0 8px;
-}
-
-/* ---------- Page layout shared by the feature pages ---------- */
-.page-header {
   display: flex;
   align-items: center;
+  gap: 8px;
+  color: var(--bad-fg);
+  background: var(--bad-bg);
+  padding: 10px 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: 0.875rem;
+  margin: 0 0 12px;
+}
+
+/* ======================================================================
+   Page layout shared by the feature pages
+   ====================================================================== */
+.page-header {
+  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: 12px 16px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 
   h1 {
     margin: 0;
-    font-size: 1.5rem;
+    font-size: clamp(1.35rem, 1.1rem + 1vw, 1.75rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+  }
+
+  > .muted {
+    flex-basis: 100%;
+    order: 3;
+    margin: -4px 0 0;
   }
 }
 
 .toolbar {
   display: flex;
-  gap: 12px;
+  gap: 8px 12px;
   flex-wrap: wrap;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  @include mat.theme((density: -3));
 
   mat-form-field {
-    min-width: 180px;
+    flex: 0 1 200px;
+    min-width: 160px;
   }
+}
+
+.page-header .toolbar {
+  margin: 0;
 }
 
 .grid {
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  margin-bottom: 16px;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  margin-bottom: 20px;
 }
 
 .stats {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  margin-bottom: 24px;
+
+  app-stat:nth-child(6n + 1) { --tone: var(--tone-violet); }
+  app-stat:nth-child(6n + 2) { --tone: var(--tone-blue); }
+  app-stat:nth-child(6n + 3) { --tone: var(--tone-green); }
+  app-stat:nth-child(6n + 4) { --tone: var(--tone-amber); }
+  app-stat:nth-child(6n + 5) { --tone: var(--tone-cyan); }
+  app-stat:nth-child(6n + 6) { --tone: var(--tone-rose); }
 }
 
 .form-grid {
   display: grid;
-  gap: 0 12px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
   align-items: start;
+  margin-bottom: 8px;
+
+  > mat-checkbox,
+  > mat-slide-toggle {
+    align-self: center;
+  }
 }
 
 .form-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
   justify-content: flex-end;
   margin-top: 8px;
 }
 
+/* Cards: soft surface with a hairline border and a gentle shadow. */
+.mat-mdc-card.mat-mdc-card-outlined {
+  box-shadow: var(--app-shadow);
+  overflow: hidden;
+}
+
+.mat-mdc-card-header {
+  padding: 20px 20px 4px !important;
+}
+
+.mat-mdc-card-content:last-child {
+  padding-bottom: 20px !important;
+}
+
+.mat-mdc-card-content {
+  padding: 12px 20px !important;
+}
+
+.mat-mdc-card-actions {
+  padding: 4px 12px 12px !important;
+}
+
 mat-card.panel {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .section-title {
-  font-size: 1.05rem;
-  margin: 16px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 24px 0 12px;
+
+  &::before {
+    content: '';
+    width: 4px;
+    height: 18px;
+    border-radius: 4px;
+    background: var(--app-gradient);
+  }
 }
 
 .muted {
-  color: var(--mat-sys-on-surface-variant);
+  color: var(--app-muted);
 }
 
 .empty {
-  padding: 24px;
+  padding: 32px 16px;
   text-align: center;
-  color: var(--mat-sys-on-surface-variant);
+  color: var(--app-muted);
 }
 
-/* Plain, dense data table: simpler than mat-table for read-mostly lists. */
+p.empty {
+  border: 1.5px dashed var(--app-border-strong);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-2);
+}
+
+mat-progress-bar {
+  border-radius: 4px;
+}
+
+.mat-mdc-tab-group .mat-mdc-tab-header {
+  border-bottom: 1px solid var(--app-border);
+}
+
+/* ======================================================================
+   Data tables
+   Desktop/tablet: clean table in a card that scrolls sideways when needed.
+   Phone: every row becomes a card, with each cell labelled by its column
+   header (the labels are filled in by the DataTable directive).
+   ====================================================================== */
 .table-wrap {
   overflow-x: auto;
-  background: var(--mat-sys-surface);
-  border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 12px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
 }
 
 table.data-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.9rem;
 
   th,
   td {
-    padding: 10px 12px;
+    padding: 12px 16px;
     text-align: start;
-    border-bottom: 1px solid var(--mat-sys-outline-variant);
+    border-bottom: 1px solid var(--app-border);
     vertical-align: middle;
   }
 
   th {
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--mat-sys-on-surface-variant);
-    background: var(--mat-sys-surface-container);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--app-muted);
+    background: var(--app-surface-2);
     white-space: nowrap;
+  }
+
+  tbody tr {
+    transition: background-color 0.15s ease;
+  }
+
+  tbody tr:hover td {
+    background: color-mix(in srgb, var(--mat-sys-primary) 4%, transparent);
   }
 
   tr:last-child td {
@@ -166,10 +369,11 @@ table.data-table {
   }
 
   tr.selected td {
-    background: var(--mat-sys-secondary-container);
+    background: color-mix(in srgb, var(--mat-sys-primary) 10%, transparent);
   }
 
-  td.num {
+  td.num,
+  th.num {
     font-variant-numeric: tabular-nums;
     direction: ltr;
     text-align: end;
@@ -179,22 +383,195 @@ table.data-table {
     white-space: nowrap;
     text-align: end;
   }
+
+  td .muted {
+    font-size: 0.8rem;
+    margin-top: 2px;
+  }
+
+  td.empty {
+    padding: 32px 16px;
+    text-align: center;
+  }
 }
 
+/* Tables inside a card sit flush with the card edges. */
+.mat-mdc-card-content > table.data-table {
+  margin: 0 -20px;
+  width: calc(100% + 40px);
+
+  tr:first-child td {
+    border-top: 1px solid var(--app-border);
+  }
+}
+
+@media (max-width: 639px) {
+  .table-wrap {
+    overflow: visible;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  table.data-table {
+    display: block;
+
+    thead {
+      display: none;
+    }
+
+    tbody {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    tr {
+      display: block;
+      padding: 8px 16px;
+      background: var(--app-surface);
+      border: 1px solid var(--app-border);
+      border-radius: 16px;
+      box-shadow: var(--app-shadow);
+    }
+
+    tbody tr:hover td,
+    tr.selected td {
+      background: transparent;
+    }
+
+    tr.selected {
+      border-color: var(--mat-sys-primary);
+      background: color-mix(in srgb, var(--mat-sys-primary) 8%, var(--app-surface));
+    }
+
+    td {
+      display: block;
+      padding: 8px 0;
+      border-bottom: 1px dashed var(--app-border);
+      text-align: end;
+      width: auto !important;
+      min-height: 20px;
+      overflow-wrap: anywhere;
+
+      &:not([data-label]) {
+        text-align: start;
+      }
+
+      &[data-label]::before {
+        content: attr(data-label);
+        float: inline-start;
+        margin-inline-end: 16px;
+        font-size: 0.78rem;
+        font-weight: 500;
+        color: var(--app-muted);
+        text-align: start;
+      }
+
+      &::after {
+        content: '';
+        display: table;
+        clear: both;
+      }
+
+      &:last-child {
+        border-bottom: 0;
+      }
+
+      &.actions {
+        white-space: normal;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 4px;
+
+        &::before,
+        &::after {
+          display: none;
+        }
+      }
+
+      &.empty {
+        text-align: center;
+        border: 0;
+      }
+
+      &:empty {
+        display: none;
+      }
+
+      input,
+      select,
+      textarea {
+        max-width: 100%;
+      }
+    }
+
+    /* Numbers stay left-to-right, so place the label on the correct side by hand. */
+    td:is(.num, .ltr) {
+      text-align: end;
+    }
+  }
+
+  [dir='rtl'] table.data-table td:is(.num, .ltr) {
+    text-align: left;
+
+    &[data-label]::before {
+      float: right;
+      margin: 0 0 0 16px;
+    }
+  }
+
+  .mat-mdc-card-content > table.data-table {
+    margin: 0;
+    width: 100%;
+
+    tr {
+      box-shadow: none;
+      background: var(--app-surface-2);
+    }
+
+    tr:first-child td {
+      border-top: 0;
+    }
+  }
+}
+
+/* ======================================================================
+   Status pills
+   ====================================================================== */
 .status {
-  display: inline-block;
-  padding: 2px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
   border-radius: 999px;
-  font-size: 0.78rem;
-  background: var(--mat-sys-surface-container-high);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: var(--app-muted);
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border);
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
 
   &.ok,
   &.Paid,
   &.Active,
   &.Completed,
-  &.Present {
-    background: #d9f2e1;
-    color: #145a32;
+  &.Present,
+  &.success {
+    color: var(--ok-fg);
+    background: var(--ok-bg);
+    border-color: transparent;
   }
 
   &.warn,
@@ -203,9 +580,17 @@ table.data-table {
   &.Pending,
   &.Trial,
   &.Late,
-  &.Scheduled {
-    background: #fff1cc;
-    color: #7a5200;
+  &.pending {
+    color: var(--warn-fg);
+    background: var(--warn-bg);
+    border-color: transparent;
+  }
+
+  &.Scheduled,
+  &.info {
+    color: var(--info-fg);
+    background: var(--info-bg);
+    border-color: transparent;
   }
 
   &.bad,
@@ -213,13 +598,262 @@ table.data-table {
   &.Suspended,
   &.Cancelled,
   &.Expired,
-  &.Absent {
-    background: #fde0e0;
-    color: #8a1c1c;
+  &.Absent,
+  &.failed {
+    color: var(--bad-fg);
+    background: var(--bad-bg);
+    border-color: transparent;
   }
+}
+
+p.status {
+  display: flex;
+  border-radius: var(--app-radius-sm);
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  white-space: normal;
 }
 
 .ltr {
   direction: ltr;
   unicode-bidi: isolate;
+}
+
+/* Inline inputs inside editable tables (hours, prices, scores...). */
+input.cell,
+input.cell-input,
+td input[type='time'] {
+  font: inherit;
+  padding: 8px 10px !important;
+  border: 1px solid var(--app-border-strong) !important;
+  border-radius: 10px !important;
+  background: var(--app-surface) !important;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+
+  &:focus {
+    outline: none;
+    border-color: var(--mat-sys-primary) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--mat-sys-primary) 18%, transparent);
+  }
+}
+
+/* ======================================================================
+   Phones
+   ====================================================================== */
+@media (max-width: 639px) {
+  .page-header {
+    align-items: stretch;
+    margin-bottom: 16px;
+
+    > .mat-mdc-button-base,
+    > a.mat-mdc-button-base {
+      flex: 1 1 auto;
+    }
+
+    .toolbar {
+      width: 100%;
+    }
+  }
+
+  .toolbar mat-form-field {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  .form-actions > .mat-mdc-button-base {
+    flex: 1 1 auto;
+  }
+
+  .mat-mdc-card-header {
+    padding: 16px 16px 4px !important;
+  }
+
+  .mat-mdc-card-content {
+    padding: 12px 16px !important;
+  }
+
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .grid {
+    gap: 16px;
+  }
+}
+
+/* ======================================================================
+   Motion and interaction
+   Content rises in with a short stagger, controls respond to touch and
+   hover, and route changes / theme switches use View Transitions.
+   ====================================================================== */
+$ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-5px); }
+  40%, 60% { transform: translateX(5px); }
+}
+
+@keyframes pulse-dot {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@keyframes shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+
+.page-header,
+.stats > *,
+.grid > *,
+.toolbar,
+.table-wrap,
+mat-card.panel,
+.mat-mdc-tab-group,
+p.empty {
+  animation: rise-in 0.5s $ease-out both;
+}
+
+@for $i from 1 through 8 {
+  .stats > :nth-child(#{$i}),
+  .grid > :nth-child(#{$i}) {
+    animation-delay: #{($i - 1) * 55}ms;
+  }
+}
+
+.toolbar { animation-delay: 60ms; }
+.table-wrap { animation-delay: 100ms; }
+
+/* Rows fade in one after another the first time they appear. */
+table.data-table tbody tr {
+  animation: fade-in 0.4s ease both;
+}
+
+@for $i from 1 through 12 {
+  table.data-table tbody tr:nth-child(#{$i}) {
+    animation-delay: #{$i * 22}ms;
+  }
+}
+
+/* Cards in a grid lift on hover; form panels stay put. */
+.mat-mdc-card.mat-mdc-card-outlined {
+  transition: box-shadow 0.25s ease, transform 0.25s $ease-out, border-color 0.25s ease;
+}
+
+.grid > .mat-mdc-card.mat-mdc-card-outlined:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--app-shadow-lg);
+  border-color: color-mix(in srgb, var(--mat-sys-primary) 30%, var(--app-border));
+}
+
+/* Buttons: press feedback, and primary actions get the brand gradient with a glow. */
+.mat-mdc-button-base {
+  transition: transform 0.12s ease, box-shadow 0.2s ease, background-position 0.4s ease;
+}
+
+.mat-mdc-button-base:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.mat-mdc-unelevated-button:not(:disabled):not(.mat-warn) {
+  background-image: linear-gradient(120deg, #7c3aed, #4f46e5 45%, #0ea5e9 90%, #7c3aed);
+  background-size: 220% 100%;
+  background-position: 0 0;
+  color: #fff;
+
+  &:hover {
+    background-position: 100% 0;
+    box-shadow: 0 8px 20px -8px rgb(99 70 229 / 65%);
+  }
+}
+
+.mat-mdc-outlined-button:not(:disabled):hover {
+  border-color: var(--mat-sys-primary);
+  background: color-mix(in srgb, var(--mat-sys-primary) 6%, transparent);
+}
+
+/* Live states pulse gently. */
+.status:is(.Scheduled, .Pending, .pending, .Trial)::before {
+  animation: pulse-dot 2s ease-out infinite;
+}
+
+.form-error {
+  animation: shake 0.45s ease both;
+}
+
+.mat-mdc-menu-panel,
+.mat-mdc-select-panel,
+.mat-mdc-autocomplete-panel {
+  animation: pop-in 0.16s ease-out both;
+}
+
+:focus-visible {
+  outline-color: var(--mat-sys-primary);
+}
+
+/* Placeholder blocks while data loads. */
+.skeleton {
+  display: block;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--app-surface-2) 25%, color-mix(in srgb, var(--app-border) 70%, var(--app-surface)) 50%, var(--app-surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+
+/* Route changes: only the page area slides/fades; the shell stays still. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-old(page) {
+  animation: 0.16s ease both fade-out-page;
+}
+
+::view-transition-new(page) {
+  animation: 0.32s $ease-out both rise-in;
+}
+
+@keyframes fade-out-page {
+  to { opacity: 0; transform: translateY(-6px); }
+}
+
+/* Theme switch: a circle grows from the button (ThemeService animates the clip). */
+html.theme-transition .shell-main {
+  view-transition-name: none !important;
+}
+
+html.theme-transition::view-transition-old(root),
+html.theme-transition::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
 }

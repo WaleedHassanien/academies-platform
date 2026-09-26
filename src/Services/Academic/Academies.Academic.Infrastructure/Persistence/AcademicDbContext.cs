@@ -30,6 +30,7 @@ public sealed class AcademicDbContext(DbContextOptions<AcademicDbContext> option
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<Attendance> Attendances => Set<Attendance>();
     public DbSet<SessionFeedback> Feedbacks => Set<SessionFeedback>();
+    public DbSet<SessionExcuse> Excuses => Set<SessionExcuse>();
     public DbSet<Assignment> Assignments => Set<Assignment>();
     public DbSet<AssignmentSubmission> Submissions => Set<AssignmentSubmission>();
     public DbSet<Certificate> Certificates => Set<Certificate>();
@@ -45,6 +46,7 @@ public sealed class AcademicDbContext(DbContextOptions<AcademicDbContext> option
             e.ToTable("Students");
             e.Property(x => x.Level).HasMaxLength(50);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.TimeZone).HasMaxLength(64);
             e.HasIndex(x => x.UserId).IsUnique();
             e.HasIndex(x => x.ParentUserId);
         });
@@ -124,7 +126,21 @@ public sealed class AcademicDbContext(DbContextOptions<AcademicDbContext> option
             e.HasOne<Group>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => new { x.TeacherUserId, x.StartsAtUtc });
             e.HasIndex(x => new { x.GroupId, x.StartsAtUtc });
+            e.HasIndex(x => new { x.StudentUserId, x.StartsAtUtc });
             e.HasIndex(x => new { x.Status, x.StartsAtUtc });
+            e.HasIndex(x => x.MakeupOfSessionId);
+        });
+        b.Entity<SessionExcuse>(e =>
+        {
+            e.ToTable("SessionExcuses");
+            e.Property(x => x.Reason).HasMaxLength(1000);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Resolution).HasConversion<string>().HasMaxLength(30);
+            e.Property(x => x.ResolutionNote).HasMaxLength(1000);
+            e.HasOne<Session>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.SessionId);
+            e.HasIndex(x => new { x.StudentUserId, x.Status });
+            e.HasIndex(x => x.Status);
         });
         b.Entity<Attendance>(e =>
         {

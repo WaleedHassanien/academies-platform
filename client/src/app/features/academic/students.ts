@@ -6,11 +6,12 @@ import { AuthService } from '../../core/auth/auth.service';
 import { Permissions } from '../../core/auth/permissions';
 import { Notifier } from '../../shared/notifier';
 import { PAGE_IMPORTS } from '../../shared/page-imports';
+import { TimeZoneField } from '../../shared/time-zone-field';
 
 /** Student profiles: level, enrollment, status and guardian (US-020). */
 @Component({
   selector: 'app-students',
-  imports: [PAGE_IMPORTS],
+  imports: [PAGE_IMPORTS, TimeZoneField],
   template: `
     <div class="page-header"><h1>{{ 'nav.students' | translate }}</h1></div>
     <p class="muted">{{ 'students.hint' | translate }}</p>
@@ -35,20 +36,24 @@ import { PAGE_IMPORTS } from '../../shared/page-imports';
 
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'students.level' | translate }}</th><th>{{ 'nav.groups' | translate }}</th><th>{{ 'students.parent' | translate }}</th><th>{{ 'students.enrolled' | translate }}</th><th>{{ 'common.status' | translate }}</th><th></th></tr></thead>
+        <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'students.level' | translate }}</th><th>{{ 'nav.groups' | translate }}</th><th>{{ 'students.teachers' | translate }}</th><th>{{ 'students.parent' | translate }}</th><th>{{ 'students.enrolled' | translate }}</th><th>{{ 'common.status' | translate }}</th><th></th></tr></thead>
         <tbody>
           @for (s of students(); track s.userId) {
             <tr [class.selected]="editing()?.userId === s.userId">
-              <td>{{ s.fullName }}<div class="muted ltr small">{{ s.email }}</div></td>
+              <td><a class="name" [routerLink]="['/students', s.userId]">{{ s.fullName }}</a><div class="muted ltr small">{{ s.email }}</div></td>
               <td>{{ s.level ?? '—' }}</td>
               <td>{{ s.groups.join('، ') || '—' }}</td>
+              <td>{{ teacherNames(s) || '—' }}</td>
               <td>{{ s.parentName ?? '—' }}</td>
               <td>{{ s.enrollmentDate | date: 'mediumDate' }}</td>
               <td><span class="status" [class]="s.status">{{ 'status.' + s.status | translate }}</span></td>
-              <td class="actions">@if (canManage) { <button mat-button (click)="edit(s)">{{ 'common.edit' | translate }}</button> }</td>
+              <td class="actions">
+                <a mat-button [routerLink]="['/students', s.userId]"><mat-icon>visibility</mat-icon>{{ 'students.view' | translate }}</a>
+                @if (canManage) { <button mat-button (click)="edit(s)">{{ 'common.edit' | translate }}</button> }
+              </td>
             </tr>
           } @empty {
-            <tr><td colspan="7" class="empty">{{ 'common.noData' | translate }}</td></tr>
+            <tr><td colspan="8" class="empty">{{ 'common.noData' | translate }}</td></tr>
           }
         </tbody>
       </table>
@@ -72,6 +77,7 @@ import { PAGE_IMPORTS } from '../../shared/page-imports';
                 @for (p of parents(); track p.userId) { <mat-option [value]="p.userId">{{ p.fullName }}</mat-option> }
               </mat-select>
             </mat-form-field>
+            <app-time-zone-field [(value)]="e.timeZone" [label]="'students.timeZone' | translate" [clearLabel]="'common.remove' | translate" />
           </div>
           <div class="form-actions">
             <button mat-button (click)="editing.set(null)">{{ 'common.cancel' | translate }}</button>
@@ -81,7 +87,11 @@ import { PAGE_IMPORTS } from '../../shared/page-imports';
       </mat-card>
     }
   `,
-  styles: `.small { font-size: 0.78rem; }`,
+  styles: `
+    .small { font-size: 0.78rem; }
+    .name { font-weight: 600; text-decoration: none; }
+    .name:hover { text-decoration: underline; }
+  `,
 })
 export class StudentsPage implements OnInit {
   private readonly api = inject(ApiService);
@@ -115,8 +125,13 @@ export class StudentsPage implements OnInit {
     this.editing.set({ ...s });
   }
 
+  protected teacherNames(s: StudentDto): string {
+    return s.teachers.map((t) => t.fullName).join('، ');
+  }
+
   protected save(e: StudentDto): void {
-    this.api.put(`${Api.academic}/students/${e.userId}`, { level: e.level || null, enrollmentDate: e.enrollmentDate, status: e.status }).subscribe({
+    const body = { level: e.level || null, enrollmentDate: e.enrollmentDate, status: e.status, timeZone: e.timeZone };
+    this.api.put(`${Api.academic}/students/${e.userId}`, body).subscribe({
       next: () =>
         this.api.put(`${Api.academic}/students/${e.userId}/parent`, { parentUserId: e.parentUserId }).subscribe({
           next: () => {
