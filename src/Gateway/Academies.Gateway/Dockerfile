@@ -1,5 +1,5 @@
 # Build context is the repo root: docker build -f src/Gateway/Academies.Gateway/Dockerfile .
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/ src/

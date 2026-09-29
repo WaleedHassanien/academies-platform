@@ -1,0 +1,6 @@
+# Automatic HTTPS (Let's Encrypt) for $DOMAIN; everything goes to the client's nginx,
+# which serves the SPA and proxies /api to the gateway.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy client:80
+}

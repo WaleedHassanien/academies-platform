@@ -1,0 +1,177 @@
+# Production stack for a single VM. Images come from GHCR (built by .github/workflows/docker.yml);
+# Caddy terminates HTTPS in front of the client, which proxies /api to the gateway.
+# Only Caddy publishes ports (80/443). Values come from .env next to this file (see .env.prod.example).
+#   docker compose -f docker-compose.prod.yml up -d
+name: academies
+
+x-dotnet-env: &dotnet-env
+  ASPNETCORE_ENVIRONMENT: Production
+  DOTNET_gcServer: "0"
+  Database__MigrateOnStartup: "true"
+  ConnectionStrings__Database: Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-academies};Uid=${MYSQL_USER:-academies};Pwd=${MYSQL_PASSWORD:?set MYSQL_PASSWORD};AllowPublicKeyRetrieval=true;
+  ConnectionStrings__Redis: redis:6379
+  ConnectionStrings__RabbitMq: amqp://${RABBITMQ_USER:-academies}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672
+  Jwt__Authority: http://identity-api:8080
+  Internal__ApiKey: ${INTERNAL_API_KEY:?set INTERNAL_API_KEY}
+  Services__Identity: http://identity-api:8080
+  Services__Subscription: http://subscription-api:8080
+  Services__Academic: http://academic-api:8080
+  Services__Finance: http://finance-api:8080
+  Services__Engagement: http://engagement-api:8080
+  Email__SmtpHost: ${SMTP_HOST:-}
+  Email__UserName: ${SMTP_USER:-}
+  Email__Password: ${SMTP_PASSWORD:-}
+  Email__From: ${SMTP_FROM:-no-reply@academies.local}
+
+x-dotnet-deps: &dotnet-deps
+  mysql:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  mysql:
+    <<: *restart
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-academies}
+      MYSQL_USER: ${MYSQL_USER:-academies}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    <<: *restart
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    <<: *restart
+    image: rabbitmq:4-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-academies}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  identity-api:
+    <<: *restart
+    image: ${IMAGE_PREFIX:?set IMAGE_PREFIX}/identity-api:${IMAGE_TAG:-latest}
+    environment:
+      <<: *dotnet-env
+      Jwt__SigningKeyPath: /app/keys/signing.pem
+      Seed__Enabled: "true"
+      Seed__SuperAdminEmail: ${SEED_SUPERADMIN_EMAIL:-superadmin@academies.local}
+      Seed__SuperAdminPassword: ${SEED_SUPERADMIN_PASSWORD:?set SEED_SUPERADMIN_PASSWORD}
+      Seed__DemoAcademy: ${SEED_DEMO_ACADEMY:-false}
+      Seed__DemoAdminPassword: ${SEED_DEMO_ADMIN_PASSWORD:-}
+    volumes:
+      - ./keys/signing.pem:/app/keys/signing.pem:ro
+    depends_on: *dotnet-deps
+
+  subscription-api:
+    <<: *restart
+    image: ${IMAGE_PREFIX}/subscription-api:${IMAGE_TAG:-latest}
+    environment: *dotnet-env
+    depends_on: *dotnet-deps
+
+  academic-api:
+    <<: *restart
+    image: ${IMAGE_PREFIX}/academic-api:${IMAGE_TAG:-latest}
+    environment:
+      <<: *dotnet-env
+      Meetings__RoomSecret: ${MEETINGS_ROOM_SECRET:?set MEETINGS_ROOM_SECRET}
+    depends_on: *dotnet-deps
+
+  finance-api:
+    <<: *restart
+    image: ${IMAGE_PREFIX}/finance-api:${IMAGE_TAG:-latest}
+    environment:
+      <<: *dotnet-env
+      Payments__Provider: ${PAYMENTS_PROVIDER:-Fake}
+      Payments__PublicBaseUrl: https://${DOMAIN}
+      Payments__ReturnUrl: https://${DOMAIN}/parent
+      Payments__PayPal__ClientId: ${PAYPAL_CLIENT_ID:-}
+      Payments__PayPal__ClientSecret: ${PAYPAL_CLIENT_SECRET:-}
+      Payments__PayPal__Mode: ${PAYPAL_MODE:-sandbox}
+      Payments__PayPal__WebhookId: ${PAYPAL_WEBHOOK_ID:-}
+      Payments__PayPal__ExchangeRates__EGP: ${PAYPAL_EGP_TO_USD:-0.0206}
+    depends_on: *dotnet-deps
+
+  engagement-api:
+    <<: *restart
+    image: ${IMAGE_PREFIX}/engagement-api:${IMAGE_TAG:-latest}
+    environment: *dotnet-env
+    depends_on: *dotnet-deps
+
+  gateway:
+    <<: *restart
+    image: ${IMAGE_PREFIX}/gateway:${IMAGE_TAG:-latest}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      DOTNET_gcServer: "0"
+      Cors__AllowedOrigins__0: https://${DOMAIN}
+      ReverseProxy__Clusters__identity__Destinations__d1__Address: http://identity-api:8080
+      ReverseProxy__Clusters__subscription__Destinations__d1__Address: http://subscription-api:8080
+      ReverseProxy__Clusters__academic__Destinations__d1__Address: http://academic-api:8080
+      ReverseProxy__Clusters__finance__Destinations__d1__Address: http://finance-api:8080
+      ReverseProxy__Clusters__engagement__Destinations__d1__Address: http://engagement-api:8080
+    depends_on:
+      - identity-api
+      - subscription-api
+      - academic-api
+      - finance-api
+      - engagement-api
+
+  client:
+    <<: *restart
+    image: ${IMAGE_PREFIX}/client:${IMAGE_TAG:-latest}
+    depends_on:
+      - gateway
+
+  caddy:
+    <<: *restart
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - client
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  caddy-data:
+  caddy-config:

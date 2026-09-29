@@ -118,6 +118,9 @@ Outside Development, migrations run with `--migrate` or `Database__MigrateOnStar
 
 ## Production notes
 
+- Deployment to a free VM (GHCR images, auto-deploy from `main` over SSH, HTTPS via Caddy): see
+  [deploy/README.md](deploy/README.md).
+
 - Identity needs a stable signing key via `Jwt__SigningKeyPem` or a mounted `Jwt__SigningKeyPath`.
   It refuses to start without one outside Development.
 - Set `Email:SmtpHost` (and credentials) before go-live; otherwise emails only go to the log.
