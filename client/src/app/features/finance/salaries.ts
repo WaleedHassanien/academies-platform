@@ -306,6 +306,21 @@ export class ExpensesPage implements OnInit {
         <app-stat icon="account_balance" [label]="'finance.net' | translate" [value]="(s.net | number: '1.0-2') ?? ''" />
         <app-stat icon="pending_actions" [label]="'finance.outstanding' | translate" [value]="(s.outstanding | number: '1.0-2') ?? ''" />
       </div>
+      @if (s.missingRates?.length) {
+        <p class="status warn">{{ 'finance.missingRates' | translate: { currencies: s.missingRates!.join(', ') } }}</p>
+      }
+      @if (byCurrency().length > 1) {
+        <div class="table-wrap currencies">
+          <table class="data-table">
+            <thead><tr><th>{{ 'billing.currency' | translate }}</th><th>{{ 'finance.revenue' | translate }}</th><th>{{ 'finance.outstanding' | translate }}</th></tr></thead>
+            <tbody>
+              @for (c of byCurrency(); track c.currency) {
+                <tr><td>{{ 'currency.' + c.currency | translate }}</td><td class="num">{{ c.revenue | number: '1.0-2' }}</td><td class="num">{{ c.outstanding | number: '1.0-2' }}</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
       <mat-card appearance="outlined" class="panel">
         <mat-card-content><app-bar-chart [labels]="labels()" [series]="series()" /></mat-card-content>
       </mat-card>
@@ -341,6 +356,14 @@ export class ReportsPage implements OnInit {
 
   protected readonly labels = computed(() => this.summary()?.monthly.map((m) => m.month.slice(2)) ?? []);
   protected readonly categories = computed(() => Object.entries(this.summary()?.expensesByCategory ?? {}));
+  /** Money received and still due in each billing currency, before conversion. */
+  protected readonly byCurrency = computed(() => {
+    const s = this.summary();
+    const currencies = new Set([...Object.keys(s?.revenueByCurrency ?? {}), ...Object.keys(s?.outstandingByCurrency ?? {})]);
+    return [...currencies].sort().map((currency) => ({
+      currency, revenue: s?.revenueByCurrency?.[currency] ?? 0, outstanding: s?.outstandingByCurrency?.[currency] ?? 0,
+    }));
+  });
   protected readonly series = computed<ChartSeries[]>(() => {
     const m = this.summary()?.monthly ?? [];
     return [

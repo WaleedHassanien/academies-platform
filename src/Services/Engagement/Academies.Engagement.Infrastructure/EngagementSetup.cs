@@ -128,9 +128,10 @@ namespace Academies.Engagement.Infrastructure
             finance.GetAsync(academyId, from, to, ct);
     }
 
-    /// <summary>Notifications for sessions, attendance, payments and salaries (US-035).</summary>
+    /// <summary>Notifications for sessions and their reports, attendance, payments, auto-pay and salaries (US-035).</summary>
     internal sealed class NotificationConsumer(IEventNotifier notifier) :
-        IConsumer<SessionReminderDue>, IConsumer<AttendanceRecorded>, IConsumer<PaymentDue>, IConsumer<PaymentRecorded>, IConsumer<SalaryPaid>
+        IConsumer<SessionReminderDue>, IConsumer<AttendanceRecorded>, IConsumer<PaymentDue>, IConsumer<PaymentRecorded>, IConsumer<SalaryPaid>,
+        IConsumer<SessionReportReady>, IConsumer<AutoPayFailed>
     {
         public Task Consume(ConsumeContext<SessionReminderDue> c) => Run(c.Message.AcademyId, ct => notifier.OnSessionReminderAsync(c.Message, ct), c.CancellationToken);
 
@@ -141,6 +142,10 @@ namespace Academies.Engagement.Infrastructure
         public Task Consume(ConsumeContext<PaymentRecorded> c) => Run(c.Message.AcademyId, ct => notifier.OnPaymentRecordedAsync(c.Message, ct), c.CancellationToken);
 
         public Task Consume(ConsumeContext<SalaryPaid> c) => Run(c.Message.AcademyId, ct => notifier.OnSalaryPaidAsync(c.Message, ct), c.CancellationToken);
+
+        public Task Consume(ConsumeContext<SessionReportReady> c) => Run(c.Message.AcademyId, ct => notifier.OnSessionReportAsync(c.Message, ct), c.CancellationToken);
+
+        public Task Consume(ConsumeContext<AutoPayFailed> c) => Run(c.Message.AcademyId, ct => notifier.OnAutoPayFailedAsync(c.Message, ct), c.CancellationToken);
 
         private static async Task Run(long academyId, Func<CancellationToken, Task> work, CancellationToken ct)
         {

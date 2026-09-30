@@ -48,7 +48,6 @@ const SECTIONS: NavSection[] = [
       { labelKey: 'nav.users', icon: 'group', link: '/users', permission: Permissions.users.view },
       { labelKey: 'nav.students', icon: 'school', link: '/students', permission: Permissions.profiles.view },
       { labelKey: 'nav.staff', icon: 'badge', link: '/staff', permission: Permissions.profiles.view },
-      { labelKey: 'nav.groups', icon: 'groups', link: '/groups', permission: Permissions.profiles.view },
       { labelKey: 'nav.subscription', icon: 'card_membership', link: '/subscription', permission: Permissions.plans.view },
       { labelKey: 'nav.audit', icon: 'manage_search', link: '/audit', permission: Permissions.auditLogs.view },
     ],
@@ -67,9 +66,14 @@ const SECTIONS: NavSection[] = [
     ],
   },
   {
+    titleKey: 'navSection.sales',
+    items: [{ labelKey: 'nav.leads', icon: 'person_search', link: '/leads', permission: Permissions.leads.view }],
+  },
+  {
     titleKey: 'navSection.finance',
     items: [
       { labelKey: 'nav.payments', icon: 'payments', link: '/payments', permission: Permissions.payments.manage },
+      { labelKey: 'nav.packages', icon: 'inventory_2', link: '/packages', permission: Permissions.payments.manage },
       { labelKey: 'nav.paymentLogs', icon: 'receipt_long', link: '/payment-logs', permission: Permissions.payments.view },
       { labelKey: 'nav.payouts', icon: 'send_money', link: '/payouts', permission: Permissions.salaries.manage },
       { labelKey: 'nav.pay', icon: 'price_change', link: '/pay', permission: Permissions.salaries.manage },

@@ -36,10 +36,10 @@ public static class SessionOutcomes
     public static bool Counts(string outcome) => outcome is Held or AbsentCounted;
 }
 
-/// <summary>One one-to-one session as Finance sees it.</summary>
+/// <summary>One session as Finance sees it; <see cref="CourseId"/> picks the subject's price.</summary>
 public sealed record LedgerSessionDto(
     long SessionId, long TeacherUserId, long StudentUserId, DateTime StartsAtUtc, int DurationMinutes, string Outcome, bool Counts,
-    string? ExcuseResolution, long? MakeupOfSessionId);
+    string? ExcuseResolution, long? MakeupOfSessionId, long CourseId);
 
 public sealed record SessionCountsDto(
     int Scheduled, int Held, int AbsentCounted, int AbsentNotCounted, int AbsentPending, int Excused, int Cancelled, int HeldMinutes)
@@ -78,7 +78,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
     public async Task<SessionDto> RequestExcuseAsync(long sessionId, RequestExcuseRequest request, CancellationToken ct = default)
     {
         var session = await LoadAsync(sessionId, ct);
-        var studentId = session.StudentUserId ?? throw new BusinessRuleException("Only one-to-one sessions can be excused.");
+        var studentId = session.StudentUserId;
         await EnsureCanActForStudentAsync(session, ct);
 
         if (session.Status != SessionStatus.Scheduled)
@@ -134,8 +134,8 @@ internal sealed partial class SessionService : ISessionOutcomeService
                 var makeup = new Session
                 {
                     Title = session.Title, CourseId = session.CourseId, StudentUserId = session.StudentUserId, TeacherUserId = session.TeacherUserId,
-                    StartsAtUtc = start, EndsAtUtc = start + (session.EndsAtUtc - session.StartsAtUtc), Type = session.Type,
-                    Location = session.Location, MakeupOfSessionId = session.Id, Notes = session.Notes,
+                    StartsAtUtc = start, EndsAtUtc = start + (session.EndsAtUtc - session.StartsAtUtc),
+                    MakeupOfSessionId = session.Id, Notes = session.Notes,
                     MeetingUrl = session.MeetingUrl,
                 };
                 await EnsureNoConflictAsync(makeup, ct);
@@ -177,7 +177,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
     public async Task<SessionDto> DecideAbsenceAsync(long sessionId, AbsenceDecisionRequest request, CancellationToken ct = default)
     {
         var session = await LoadAsync(sessionId, ct);
-        var studentId = session.StudentUserId ?? throw new BusinessRuleException("Only one-to-one sessions have an absence decision.");
+        var studentId = session.StudentUserId;
         await EnsureCanDecideAsync(session, ct);
 
         var absent = await db.Attendances.AnyAsync(a => a.SessionId == sessionId && a.StudentUserId == studentId && a.Status == AttendanceStatus.Absent, ct);
@@ -196,7 +196,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
     public async Task<IReadOnlyList<SessionDto>> PendingAbsencesAsync(CancellationToken ct = default)
     {
         var q = db.Sessions.AsNoTracking()
-            .Where(s => s.StudentUserId != null && s.AbsenceCounted == null && s.Status != SessionStatus.Cancelled && s.Status != SessionStatus.Excused)
+            .Where(s => s.AbsenceCounted == null && s.Status != SessionStatus.Cancelled && s.Status != SessionStatus.Excused)
             .Where(s => db.Attendances.Any(a => a.SessionId == s.Id && a.StudentUserId == s.StudentUserId && a.Status == AttendanceStatus.Absent));
 
         if (!CanDecideAll)
@@ -213,7 +213,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
     public async Task<IReadOnlyList<LedgerSessionDto>> LedgerAsync(
         DateTime fromUtc, DateTime toUtc, long? teacherUserId, long? studentUserId, CancellationToken ct = default)
     {
-        var q = db.Sessions.AsNoTracking().Where(s => s.StudentUserId != null && s.StartsAtUtc >= fromUtc && s.StartsAtUtc < toUtc);
+        var q = db.Sessions.AsNoTracking().Where(s => s.StartsAtUtc >= fromUtc && s.StartsAtUtc < toUtc);
         if (teacherUserId is { } t)
         {
             q = q.Where(s => s.TeacherUserId == t);
@@ -230,8 +230,8 @@ internal sealed partial class SessionService : ISessionOutcomeService
         {
             var (outcome, resolution) = outcomes[s.Id];
             return new LedgerSessionDto(
-                s.Id, s.TeacherUserId, s.StudentUserId!.Value, s.StartsAtUtc, (int)Math.Round((s.EndsAtUtc - s.StartsAtUtc).TotalMinutes),
-                outcome, SessionOutcomes.Counts(outcome), resolution, s.MakeupOfSessionId);
+                s.Id, s.TeacherUserId, s.StudentUserId, s.StartsAtUtc, (int)Math.Round((s.EndsAtUtc - s.StartsAtUtc).TotalMinutes),
+                outcome, SessionOutcomes.Counts(outcome), resolution, s.MakeupOfSessionId, s.CourseId);
         }).ToList();
     }
 
@@ -271,7 +271,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
                 students.UnionWith(await guard.ChildrenIdsAsync(guard.Me, ct));
             }
 
-            q = q.Where(s => teachers.Contains(s.TeacherUserId) || (s.StudentUserId != null && students.Contains(s.StudentUserId.Value)));
+            q = q.Where(s => teachers.Contains(s.TeacherUserId) || students.Contains(s.StudentUserId));
         }
 
         var sessions = await q.ToListAsync(ct);
@@ -279,7 +279,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
         var rows = sessions.Select(s => (Session: s, Outcome: outcomes[s.Id].Outcome)).ToList();
 
         var names = await db.People.NamesAsync(
-            rows.Select(r => r.Session.TeacherUserId).Concat(rows.Where(r => r.Session.StudentUserId.HasValue).Select(r => r.Session.StudentUserId!.Value)), ct);
+            rows.Select(r => r.Session.TeacherUserId).Concat(rows.Select(r => r.Session.StudentUserId)), ct);
         List<SessionReportRowDto> Group(Func<Session, long?> key) => rows
             .Where(r => key(r.Session).HasValue)
             .GroupBy(r => key(r.Session)!.Value)
@@ -330,7 +330,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
                 return (SessionOutcomes.Cancelled, (string?)null);
             }
 
-            if (s.StudentUserId is { } student && absent.Contains((s.Id, student)))
+            if (absent.Contains((s.Id, s.StudentUserId)))
             {
                 var outcome = s.AbsenceCounted switch
                 {
@@ -368,7 +368,7 @@ internal sealed partial class SessionService : ISessionOutcomeService
         var me = guard.Me;
         var allowed = session.StudentUserId == me
                       || session.TeacherUserId == me
-                      || (guard.IsInRole(Roles.Parent) && (await guard.ChildrenIdsAsync(me, ct)).Contains(session.StudentUserId!.Value))
+                      || (guard.IsInRole(Roles.Parent) && (await guard.ChildrenIdsAsync(me, ct)).Contains(session.StudentUserId))
                       || await CanDecideAsync(session, ct);
         if (!allowed)
         {

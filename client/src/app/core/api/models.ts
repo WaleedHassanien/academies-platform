@@ -88,13 +88,121 @@ export interface StudentDto {
   status: string;
   parentUserId: number | null;
   parentName: string | null;
-  groups: string[];
+  /** Subjects the student is actively enrolled in. */
+  subjects: string[];
   /** IANA zone, e.g. "Asia/Riyadh". */
   timeZone: string | null;
-  /** Own teachers plus the teachers of the student's groups. */
   teachers: { userId: number; fullName: string }[];
-  /** Usual length of their one-to-one session. */
+  /** Usual length of their session. */
   sessionMinutes: number;
+  /** Who was chosen to pay (null = the guardian, else the student). */
+  payerUserId: number | null;
+  /** Who actually receives invoices and payment notices. */
+  effectivePayerUserId: number;
+  payerName: string | null;
+}
+
+/** The teacher's log of a session; every field optional. The Quran fields apply to Quran subjects. */
+export interface SessionLogDto {
+  rating: number | null;
+  comment: string | null;
+  accomplished: string | null;
+  homework: string | null;
+  memorization: string | null;
+  revision: string | null;
+  mistakes: number | null;
+}
+
+export type CourseKind = 'Quran' | 'Arabic' | 'IslamicStudies' | 'Other';
+
+export interface EnrollmentDto {
+  id: number;
+  studentUserId: number;
+  studentName: string | null;
+  courseId: number;
+  courseName: string | null;
+  courseKind: CourseKind;
+  teacherUserId: number | null;
+  teacherName: string | null;
+  status: 'Active' | 'Paused' | 'Ended';
+  startedOn: string;
+  endedOn: string | null;
+}
+
+export interface LearningPlanDto {
+  id: number;
+  studentUserId: number;
+  courseId: number;
+  courseName: string | null;
+  courseKind: CourseKind | null;
+  teacherUserId: number;
+  teacherName: string | null;
+  goal: string;
+  reference: string | null;
+  expectedAmount: string | null;
+  targetDate: string | null;
+  status: 'Active' | 'Achieved' | 'Closed';
+  notes: string | null;
+  createdOnUtc: string;
+  updatedOnUtc: string | null;
+}
+
+// ---------- Sales: leads and trial sessions ----------
+export type LeadStatus = 'New' | 'Contacted' | 'TrialScheduled' | 'TrialDone' | 'Converted' | 'Lost';
+export type TrialStatus = 'Scheduled' | 'Attended' | 'NoShow' | 'Cancelled';
+
+export interface TrialDto {
+  leadId: number;
+  leadName: string;
+  phone: string | null;
+  timeZone: string | null;
+  courseId: number | null;
+  courseName: string | null;
+  teacherUserId: number;
+  teacherName: string | null;
+  startsAtUtc: string;
+  endsAtUtc: string;
+  status: TrialStatus;
+  notes: string | null;
+}
+
+export interface LeadDto {
+  id: number;
+  fullName: string;
+  phone: string | null;
+  email: string | null;
+  country: string | null;
+  timeZone: string | null;
+  isAdult: boolean;
+  guardianName: string | null;
+  courseId: number | null;
+  courseName: string | null;
+  source: string | null;
+  status: LeadStatus;
+  lostReason: string | null;
+  assignedToUserId: number | null;
+  assignedToName: string | null;
+  nextFollowUpOn: string | null;
+  notes: string | null;
+  trial: TrialDto | null;
+  convertedStudentUserId: number | null;
+  convertedStudentName: string | null;
+  createdOnUtc: string;
+}
+
+export interface LeadActivityDto {
+  id: number;
+  note: string;
+  byUserId: number | null;
+  byName: string | null;
+  createdOnUtc: string;
+}
+
+export interface LeadSummaryDto {
+  byStatus: Record<string, number>;
+  bySource: Record<string, number>;
+  total: number;
+  conversionRate: number;
 }
 
 /** One session from a student's point of view (GET students/{id}/sessions). */
@@ -104,6 +212,7 @@ export interface StudentSessionDto {
   attendanceNote: string | null;
   rating: number | null;
   comment: string | null;
+  log: SessionLogDto | null;
 }
 
 export interface StaffProfileDto {
@@ -114,6 +223,8 @@ export interface StaffProfileDto {
   specialization: string | null;
   notes: string | null;
   linkedCount: number;
+  /** A teacher's subjects (empty = any). */
+  courseIds: number[] | null;
 }
 
 export interface ParentDto {
@@ -131,21 +242,12 @@ export interface WorkDayDto {
   shiftEnd: string | null;
 }
 
-export interface GroupDto {
-  id: number;
-  name: string;
-  courseId: number | null;
-  courseName: string | null;
-  teacherUserId: number | null;
-  teacherName: string | null;
-  students: PersonRef[];
-}
-
 export interface CourseDto {
   id: number;
   name: string;
   description: string | null;
   level: string | null;
+  kind: CourseKind;
   isActive: boolean;
   materialCount: number;
 }
@@ -164,22 +266,22 @@ export interface SessionDto {
   title: string;
   courseId: number;
   courseName: string | null;
-  groupId: number | null;
-  groupName: string | null;
+  courseKind: CourseKind | null;
   teacherUserId: number;
   teacherName: string | null;
   startsAtUtc: string;
   endsAtUtc: string;
-  type: 'Online' | 'Offline';
+  /** The teacher's room, or a link typed in by hand. Every session is online. */
   meetingUrl: string | null;
-  location: string | null;
   status: 'Scheduled' | 'Completed' | 'Cancelled' | 'Excused';
   notes: string | null;
-  /** One-to-one sessions only. */
-  studentUserId: number | null;
+  /** Every session is one teacher with one student. */
+  studentUserId: number;
   studentName: string | null;
   makeupOfSessionId: number | null;
-  /** The one-to-one student's attendance. */
+  /** When the report went to the guardian (or adult student). */
+  reportSentOnUtc: string | null;
+  /** The student's attendance. */
   attendanceStatus: string | null;
   /** Supervisor's call on an unexcused absence: counts (billed and paid) or not; null = undecided. */
   absenceCounted: boolean | null;
@@ -255,17 +357,49 @@ export interface TeacherRateDto {
   ratePerSession: number;
 }
 
+/** One billing per subject (courseId) or one for all subjects (courseId null). */
 export interface StudentBillingDto {
+  id: number;
   studentUserId: number;
+  courseId: number | null;
   mode: BillingMode;
   pricePerSession: number;
   sessionsPerMonth: number;
+  monthlyPrice: number;
   dueDay: number;
   currency: string;
+  packageId: number | null;
+  sessionMinutes: number | null;
   rates: TeacherRateDto[];
 }
 
+export interface PackageDto {
+  id: number;
+  name: string;
+  sessionsPerMonth: number;
+  sessionMinutes: number;
+  currency: string;
+  monthlyPrice: number;
+  pricePerSession: number;
+  isActive: boolean;
+}
+
+/** A payer's saved card that renews the student's invoices automatically. */
+export interface AutoPayDto {
+  id: number;
+  studentUserId: number;
+  payerUserId: number;
+  provider: string;
+  status: 'Pending' | 'Active' | 'Cancelled';
+  cardBrand: string | null;
+  cardLast4: string | null;
+  activatedOnUtc: string | null;
+  lastError: string | null;
+}
+
 export interface BillingSummaryDto {
+  billingId: number;
+  courseId: number | null;
   studentUserId: number;
   mode: BillingMode;
   pricePerSession: number;
@@ -349,6 +483,7 @@ export interface RosterItemDto {
   attendanceNote: string | null;
   rating: number | null;
   comment: string | null;
+  log: SessionLogDto | null;
 }
 
 export interface FeedbackDto {
@@ -360,9 +495,11 @@ export interface FeedbackDto {
   studentName: string | null;
   teacherUserId: number;
   teacherName: string | null;
-  rating: number;
+  rating: number | null;
   comment: string | null;
   createdOnUtc: string;
+  log: SessionLogDto | null;
+  courseName: string | null;
 }
 
 export interface AttendanceSummary {
@@ -384,7 +521,13 @@ export interface StudentOverviewDto {
 }
 
 export interface MyOverviewDto {
-  teacher: { students: PersonRef[]; upcoming: SessionDto[]; pendingToComplete: number; completedThisMonth: number } | null;
+  teacher: {
+    students: PersonRef[];
+    upcoming: SessionDto[];
+    pendingToComplete: number;
+    completedThisMonth: number;
+    trials: TrialDto[] | null;
+  } | null;
   supervisor: {
     teachers: { userId: number; fullName: string; students: number; completedThisMonth: number }[];
     upcoming: SessionDto[];
@@ -411,8 +554,9 @@ export interface AssignmentDto {
   id: number;
   courseId: number;
   courseName: string | null;
-  groupId: number | null;
-  groupName: string | null;
+  /** For one student; null = every student enrolled in the subject. */
+  studentUserId: number | null;
+  studentName: string | null;
   teacherUserId: number;
   teacherName: string | null;
   title: string;
@@ -451,7 +595,6 @@ export interface LeaderboardEntry {
 export interface AcademicStats {
   activeStudents: number;
   teachers: number;
-  groups: number;
   sessionsScheduled: number;
   sessionsCompleted: number;
   sessionsCancelled: number;
@@ -607,15 +750,22 @@ export interface FinanceSummaryDto {
   outstanding: number;
   monthly: { month: string; revenue: number; salaries: number; expenses: number; net: number }[];
   expensesByCategory: Record<string, number>;
+  /** Base currency of the totals; other currencies are converted with the academy's rates. */
   currency: string;
+  revenueByCurrency: Record<string, number> | null;
+  outstandingByCurrency: Record<string, number> | null;
+  /** Currencies left out of the totals for lack of an exchange rate. */
+  missingRates: string[] | null;
 }
 
 export interface FinanceSettingsDto {
   currency: string;
   available: string[];
+  /** One unit of each currency in the base currency. */
+  exchangeRates: Record<string, number>;
 }
 
-/** PayPal charges USD: an EGP month shows both the amount due and what the card is charged. */
+/** PayPal can't charge EGP or SAR: such a month shows both the amount due and what the card is charged. */
 export interface CheckoutDto {
   checkoutUrl: string;
   reference: string;

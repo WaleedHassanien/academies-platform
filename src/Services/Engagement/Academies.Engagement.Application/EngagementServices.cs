@@ -149,6 +149,8 @@ public interface IEventNotifier
     Task OnPaymentDueAsync(PaymentDue e, CancellationToken ct);
     Task OnPaymentRecordedAsync(PaymentRecorded e, CancellationToken ct);
     Task OnSalaryPaidAsync(SalaryPaid e, CancellationToken ct);
+    Task OnSessionReportAsync(SessionReportReady e, CancellationToken ct);
+    Task OnAutoPayFailedAsync(AutoPayFailed e, CancellationToken ct);
 }
 
 internal sealed class EventNotifier(INotificationService notifications) : IEventNotifier
@@ -178,23 +180,67 @@ internal sealed class EventNotifier(INotificationService notifications) : IEvent
             "/", AlsoEmail: absent), ct);
     }
 
+    /// <summary>Invoices and reminders go to whoever pays (older events: the student and their guardians).</summary>
     public Task OnPaymentDueAsync(PaymentDue e, CancellationToken ct) =>
-        notifications.NotifyAsync(e.AcademyId, e.ParentUserIds.Append(e.StudentUserId), new NotificationMessage(
+        notifications.NotifyAsync(e.AcademyId, e.RecipientUserIds ?? e.ParentUserIds.Append(e.StudentUserId).ToList(), new NotificationMessage(
             e.IsOverdue ? "payment_overdue" : "payment_due",
             e.IsOverdue ? $"دفعة متأخرة (شهر {e.MonthNumber})" : $"دفعة مستحقة (شهر {e.MonthNumber})",
             e.IsOverdue ? $"Payment overdue (month {e.MonthNumber})" : $"Payment due (month {e.MonthNumber})",
-            $"المبلغ {e.Amount.ToString("0.00", Ar)} — تاريخ الاستحقاق {e.DueDate:yyyy-MM-dd}",
-            $"Amount {e.Amount:0.00} — due {e.DueDate:yyyy-MM-dd}",
+            $"المبلغ {e.Amount.ToString("0.00", Ar)} {e.Currency} — تاريخ الاستحقاق {e.DueDate:yyyy-MM-dd}",
+            $"Amount {e.Amount:0.00} {e.Currency} — due {e.DueDate:yyyy-MM-dd}",
             "/parent", AlsoEmail: true), ct);
 
     public Task OnPaymentRecordedAsync(PaymentRecorded e, CancellationToken ct)
     {
         var refund = e.Action == "Refunded";
-        return notifications.NotifyAsync(e.AcademyId, e.ParentUserIds.Append(e.StudentUserId), new NotificationMessage(
+        return notifications.NotifyAsync(e.AcademyId, e.RecipientUserIds ?? e.ParentUserIds.Append(e.StudentUserId).ToList(), new NotificationMessage(
             refund ? "payment_refunded" : "payment_received",
             refund ? "تم استرداد مبلغ" : "تم استلام دفعة", refund ? "Refund issued" : "Payment received",
-            $"المبلغ {e.Amount.ToString("0.00", Ar)}", $"Amount {e.Amount:0.00}",
+            $"المبلغ {e.Amount.ToString("0.00", Ar)} {e.Currency}", $"Amount {e.Amount:0.00} {e.Currency}",
             "/parent", AlsoEmail: false), ct);
+    }
+
+    public Task OnAutoPayFailedAsync(AutoPayFailed e, CancellationToken ct) =>
+        notifications.NotifyAsync(e.AcademyId, e.RecipientUserIds, new NotificationMessage(
+            "autopay_failed",
+            "تعذّر الدفع التلقائي بالبطاقة", "Automatic card payment failed",
+            $"المبلغ {e.Amount.ToString("0.00", Ar)} {e.Currency}. يرجى الدفع يدويًا أو تحديث البطاقة. {e.Reason}".Trim(),
+            $"Amount {e.Amount:0.00} {e.Currency}. Please pay by hand or update the card. {e.Reason}".Trim(),
+            "/parent", AlsoEmail: true), ct);
+
+    /// <summary>The report of a held session, to the guardian or the adult student, in both languages.</summary>
+    public Task OnSessionReportAsync(SessionReportReady e, CancellationToken ct)
+    {
+        var ar = new List<string> { $"{e.StudentName} — {e.CourseName} — {e.StartsAtUtc:yyyy-MM-dd HH:mm} UTC" };
+        var en = new List<string> { $"{e.StudentName} — {e.CourseName} — {e.StartsAtUtc:yyyy-MM-dd HH:mm} UTC" };
+        void Add(string? value, string arLabel, string enLabel)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                ar.Add($"{arLabel}: {value}");
+                en.Add($"{enLabel}: {value}");
+            }
+        }
+
+        Add(e.Attendance switch { "Present" => "حاضر", "Late" => "متأخر", "Absent" => "غائب", _ => null }, "الحضور", "Attendance");
+        Add(e.Rating is { } r ? $"{r}/5" : null, "التقييم", "Rating");
+        Add(e.Accomplished, "ما تم إنجازه", "Covered");
+        Add(e.Memorization, "الحفظ", "Memorisation");
+        Add(e.Revision, "المراجعة", "Revision");
+        Add(e.Mistakes?.ToString(CultureInfo.InvariantCulture), "الأخطاء", "Mistakes");
+        Add(e.Homework, "الواجب", "Homework");
+        Add(e.Comment, "ملاحظات المعلم", "Teacher's notes");
+        if (!string.IsNullOrWhiteSpace(e.TeacherName))
+        {
+            ar.Add($"المعلم: {e.TeacherName}");
+            en.Add($"Teacher: {e.TeacherName}");
+        }
+
+        static string Fit(IEnumerable<string> lines) => string.Join('\n', lines) is { Length: > 1000 } text ? text[..997] + "..." : string.Join('\n', lines);
+        return notifications.NotifyAsync(e.AcademyId, e.RecipientUserIds, new NotificationMessage(
+            "session_report",
+            $"تقرير حصة: {e.StudentName}", $"Session report: {e.StudentName}",
+            Fit(ar), Fit(en), "/", AlsoEmail: true), ct);
     }
 
     public Task OnSalaryPaidAsync(SalaryPaid e, CancellationToken ct) =>

@@ -21,8 +21,7 @@
     "users": "Users",
     "students": "Students",
     "staff": "Teachers & supervisors",
-    "groups": "Groups",
-    "courses": "Courses",
+    "courses": "Subjects",
     "sessions": "Sessions",
     "assignments": "Assignments",
     "certificates": "Certificates",
@@ -40,14 +39,17 @@
     "me": "My account",
     "notifications": "Notifications",
     "requests": "Requests",
-    "payouts": "Teacher payouts"
+    "payouts": "Teacher payouts",
+    "leads": "Leads & trials",
+    "packages": "Packages"
   },
   "navSection": {
     "platform": "Platform",
     "academy": "Academy",
     "learning": "Learning",
     "finance": "Finance",
-    "me": "Me"
+    "me": "Me",
+    "sales": "Sales"
   },
   "auth": {
     "loginTitle": "Sign in",
@@ -82,7 +84,8 @@
     "Student": "Student",
     "Parent": "Parent",
     "Accountant": "Accountant",
-    "Staff": "Staff"
+    "Staff": "Staff",
+    "Sales": "Sales & customer service"
   },
   "common": {
     "saved": "Saved",
@@ -119,7 +122,8 @@
     "amount": "Amount",
     "previous": "Previous",
     "next": "Next",
-    "back": "Back"
+    "back": "Back",
+    "email": "Email"
   },
   "status": {
     "Active": "Active",
@@ -215,7 +219,8 @@
     "outstanding": "Outstanding",
     "salaries": "Salaries",
     "expenses": "Expenses",
-    "refunds": "Refunds"
+    "refunds": "Refunds",
+    "missingRates": "Payments in {{currencies}} are left out of the totals: set their exchange rate in Payment plans."
   },
   "audit": {
     "service": "Service",
@@ -237,7 +242,7 @@
     "enrolled": "Enrolled",
     "view": "View",
     "teachers": "Teachers",
-    "teachersHint": "The student's own teachers and their groups' teachers",
+    "teachersHint": "The teachers responsible for this student",
     "noTeachers": "No teacher assigned yet",
     "timeZones": "Time zones",
     "timeZonesHint": "Session times are shown in both",
@@ -260,7 +265,15 @@
     "hours": "hours",
     "minutes": "min",
     "seconds": "sec",
-    "sessionMinutes": "Session length (min)"
+    "sessionMinutes": "Session length (min)",
+    "subject": "Subject",
+    "subjects": "Subjects",
+    "payer": "Pays",
+    "payerSelf": "The student",
+    "payerDefault": "Default (guardian, else the student)",
+    "payerHint": "Receives invoices and payment notices",
+    "noGuardian": "No guardian (adult)",
+    "guardianHint": "Optional: adult students have none"
   },
   "staff": {
     "teachers": "Teachers",
@@ -277,7 +290,10 @@
     "shiftStart": "Shift start",
     "shiftEnd": "Shift end",
     "children": "Children",
-    "dayOff": "Day off"
+    "dayOff": "Day off",
+    "subjects": "Subjects",
+    "subjectsHint": "Leave empty if the teacher can teach any subject",
+    "anySubject": "Any subject"
   },
   "days": {
     "Saturday": "Saturday",
@@ -288,12 +304,11 @@
     "Thursday": "Thursday",
     "Friday": "Friday"
   },
-  "groups": {
-    "new": "New group"
-  },
   "courses": {
-    "new": "New course",
-    "materials": "Materials"
+    "new": "New subject",
+    "materials": "Files & links",
+    "kind": "Kind",
+    "kindHint": "Quran subjects add memorisation, revision and mistakes to the session log"
   },
   "materialType": {
     "Link": "Link",
@@ -303,15 +318,11 @@
   "sessions": {
     "new": "New session",
     "duration": "Duration (minutes)",
-    "offline": "In person",
-    "online": "Online",
-    "location": "Location",
     "meetingUrl": "Meeting link",
-    "generateLink": "Generate online link",
     "repeatWeeks": "Repeat weekly (weeks)",
     "thisWeek": "This week",
     "join": "Join",
-    "attendance": "Attendance & feedback",
+    "attendance": "Attendance",
     "complete": "Mark completed",
     "cancel": "Cancel session",
     "none": "No sessions",
@@ -319,14 +330,15 @@
     "comment": "Comment",
     "noRoster": "No students in this session",
     "saveAttendance": "Save attendance",
-    "saveFeedback": "Save feedback",
-    "student": "Student (one-to-one)",
-    "groupSession": "— Group session —",
-    "studentHint": "Fills in the student's teacher and session length"
+    "student": "Student",
+    "studentHint": "Fills in the student's teacher and session length",
+    "meetingUrlHint": "Leave empty to use the teacher's own room",
+    "useTeacherRoom": "Use the teacher's room",
+    "log": "Session log"
   },
   "assignments": {
     "new": "New assignment",
-    "wholeCourse": "Whole course",
+    "wholeCourse": "Every student of the subject",
     "due": "Due",
     "maxScore": "Max score",
     "myResult": "My result",
@@ -365,8 +377,10 @@
     "totalPaid": "Total paid",
     "totalRefunded": "Total refunded",
     "action": "Action",
-    "currency": "Academy currency",
-    "currencyHint": "Applies to new plans; existing plans keep their currency."
+    "currency": "Base currency",
+    "currencyHint": "Salaries, expenses and report totals. Each student billing has its own currency.",
+    "rates": "Exchange rates",
+    "ratesHint": "How much one unit of each currency is worth in {{base}}, to add all payments into the report totals"
   },
   "method": {
     "Cash": "Cash",
@@ -435,7 +449,7 @@
   },
   "parent": {
     "payments": "Monthly payments",
-    "payOnline": "Pay with PayPal",
+    "payOnline": "Pay online",
     "noChildren": "No children are linked to your account yet.",
     "payment_success": "Payment received via PayPal. Thank you!",
     "payment_pending": "PayPal is still processing your payment; it will show here once it completes.",
@@ -449,7 +463,10 @@
   },
   "currency": {
     "USD": "US dollar (USD)",
-    "EGP": "Egyptian pound (EGP)"
+    "EGP": "Egyptian pound (EGP)",
+    "EUR": "Euro (EUR)",
+    "GBP": "Pound sterling (GBP)",
+    "SAR": "Saudi riyal (SAR)"
   },
   "palette": {
     "title": "Quick search",
@@ -579,7 +596,16 @@
     "price": "Price per session",
     "sessionsPerMonth": "Sessions per month",
     "teacherRates": "Teacher's rate per session",
-    "edit": "Price & rates"
+    "edit": "Set a price",
+    "perSubject": "Each subject is billed on its own, in its own currency",
+    "stop": "Stop billing this subject",
+    "allSubjects": "All subjects",
+    "package": "Package",
+    "custom": "Custom price",
+    "packageHint": "A ready-made monthly package sets the sessions, length and price",
+    "currency": "Currency",
+    "monthlyPrice": "Monthly price",
+    "overrideHint": "Change it to give this student a special price"
   },
   "room": {
     "myRoom": "My room",
@@ -594,5 +620,138 @@
     "copyFailed": "Couldn't copy; select the link and copy it.",
     "whatsapp": "Send on WhatsApp",
     "message": "Assalamu alaikum {{name}}, this is your personal room link for your online sessions:"
+  },
+  "courseKind": {
+    "Quran": "Quran",
+    "Arabic": "Arabic language",
+    "IslamicStudies": "Islamic studies",
+    "Other": "Other"
+  },
+  "log": {
+    "title": "Session log",
+    "hint": "Write what fits this lesson; everything is optional. The report goes to the guardian (or the adult student) once the session is completed.",
+    "accomplished": "What was covered",
+    "memorization": "New memorisation",
+    "memorizationHint": "e.g. Al-Mulk 1-10",
+    "revision": "Revision",
+    "mistakes": "Mistakes",
+    "homework": "Homework",
+    "notes": "Notes for the family",
+    "save": "Save session log",
+    "reportSent": "Report sent"
+  },
+  "plans": {
+    "title": "Subjects & plans",
+    "hint": "The teacher's plan for each subject, agreed with the family",
+    "noTeacher": "No teacher yet",
+    "reference": "Reference",
+    "expected": "Expected amount",
+    "target": "Target date",
+    "achieved": "Achieved",
+    "new": "Write a plan",
+    "none": "No plan yet",
+    "history": "Earlier plans",
+    "noSubjects": "Not enrolled in any subject yet",
+    "goal": "Goal",
+    "goalHint": "e.g. Memorise Juz Amma with tajweed",
+    "referenceHint": "e.g. Juz 30, or a book",
+    "expectedHint": "e.g. 5 lines per session",
+    "addSubject": "Add a subject",
+    "status_Active": "Active",
+    "status_Achieved": "Achieved",
+    "status_Closed": "Closed"
+  },
+  "enrollment": {
+    "Active": "Active",
+    "Paused": "Paused",
+    "Ended": "Ended"
+  },
+  "autopay": {
+    "on": "Automatic payment is on",
+    "stop": "Turn off",
+    "pending": "The card was not saved yet.",
+    "retry": "Save a card",
+    "hint": "Save a card and each invoice is paid automatically when it falls due.",
+    "start": "Pay automatically",
+    "result_success": "Your card was saved: invoices will now be paid automatically.",
+    "result_failed": "The card could not be saved. Please try again.",
+    "result_cancelled": "Saving the card was cancelled."
+  },
+  "trials": {
+    "mine": "My trial sessions",
+    "mineHint": "Free first sessions with prospective students. Record how each one went.",
+    "assessment": "Level and notes",
+    "status_Scheduled": "Scheduled",
+    "status_Attended": "Attended",
+    "status_NoShow": "No-show",
+    "status_Cancelled": "Cancelled"
+  },
+  "leads": {
+    "new": "New lead",
+    "edit": "Edit lead",
+    "total": "Leads",
+    "conversion": "Conversion",
+    "conversionHint": "Of the leads that were closed",
+    "studentName": "Student's name",
+    "isAdult": "The student is an adult",
+    "guardianName": "Guardian's name",
+    "guardian": "Guardian",
+    "country": "Country",
+    "source": "Source",
+    "followUp": "Follow up on",
+    "contact": "Contact",
+    "trial": "Trial session",
+    "open": "Open",
+    "studentPage": "Student page",
+    "scheduleTrial": "Schedule a trial",
+    "convert": "Sign up as student",
+    "markLost": "Mark lost",
+    "reopen": "Reopen",
+    "copyTrialLink": "Copy the family's link",
+    "cancelTrial": "Cancel trial",
+    "yourTime": "In your local time",
+    "convertTitle": "Sign up",
+    "convertHint": "Creates the accounts, enrols the student in the subject with the trial teacher, and copies the time zone.",
+    "studentEmail": "Student's email (login)",
+    "password": "First password",
+    "passwordHint": "Share it with the family; they can change it",
+    "noGuardian": "No guardian",
+    "newGuardian": "New guardian account",
+    "existingGuardian": "Existing guardian",
+    "guardianEmail": "Guardian's email (login)",
+    "studentPays": "The student pays (not the guardian)",
+    "activity": "Follow-up notes",
+    "addNote": "Add a note (call, message...)",
+    "lostReason": "Why was the lead lost?",
+    "linkCopied": "Link copied. It works around the trial time (until {{until}}).",
+    "converted": "Signed up. Login: {{email}} · password: {{password}}"
+  },
+  "leadStatus": {
+    "New": "New",
+    "Contacted": "Contacted",
+    "TrialScheduled": "Trial scheduled",
+    "TrialDone": "Trial done",
+    "Converted": "Signed up",
+    "Lost": "Lost"
+  },
+  "leadSource": {
+    "Website": "Website",
+    "WhatsApp": "WhatsApp",
+    "Facebook": "Facebook",
+    "Instagram": "Instagram",
+    "Referral": "Referral",
+    "Returning": "Returning student",
+    "Other": "Other"
+  },
+  "packages": {
+    "new": "New package",
+    "hint": "Packages set a prepaid monthly price per subject. Each package has its own currency.",
+    "standard": "Standard packages",
+    "standardHint": "8, 12, 16 and 20 sessions a month × 30, 45 and 60 minutes, priced from an hourly rate",
+    "pricePerHour": "Price per hour",
+    "createStandard": "Create the grid",
+    "minutes": "Session length (min)",
+    "perSession": "Per session",
+    "none": "No packages yet"
   }
 }

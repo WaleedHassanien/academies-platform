@@ -88,6 +88,13 @@ public static class Permissions
         public const string View = "auditlogs.view";
     }
 
+    /// <summary>Sales: prospective students, trial sessions and converting them into students.</summary>
+    public static class Leads
+    {
+        public const string View = "leads.view";
+        public const string Manage = "leads.manage";
+    }
+
     /// <summary>Every permission code declared above.</summary>
     public static readonly IReadOnlyList<string> All = typeof(Permissions)
         .GetNestedTypes(BindingFlags.Public | BindingFlags.Static)

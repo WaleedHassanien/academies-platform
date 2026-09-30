@@ -1,14 +1,14 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { PagedResult } from '../../core/api/api.models';
 import { Api, ApiService } from '../../core/api/api.service';
-import { GroupDto, ParentDto, StudentDto } from '../../core/api/models';
+import { CourseDto, ParentDto, StudentDto } from '../../core/api/models';
 import { AuthService } from '../../core/auth/auth.service';
 import { Permissions } from '../../core/auth/permissions';
 import { Notifier } from '../../shared/notifier';
 import { PAGE_IMPORTS } from '../../shared/page-imports';
 import { TimeZoneField } from '../../shared/time-zone-field';
 
-/** Student profiles: level, enrollment, status and guardian (US-020). */
+/** Student profiles: level, enrollment, status, the optional guardian and who pays (US-020). */
 @Component({
   selector: 'app-students',
   imports: [PAGE_IMPORTS, TimeZoneField],
@@ -19,10 +19,10 @@ import { TimeZoneField } from '../../shared/time-zone-field';
     <div class="toolbar">
       <mat-form-field><mat-label>{{ 'common.search' | translate }}</mat-label><input matInput [(ngModel)]="search" (keyup.enter)="load()" /></mat-form-field>
       <mat-form-field>
-        <mat-label>{{ 'nav.groups' | translate }}</mat-label>
-        <mat-select [(ngModel)]="groupId" (selectionChange)="load()">
+        <mat-label>{{ 'students.subject' | translate }}</mat-label>
+        <mat-select [(ngModel)]="courseId" (selectionChange)="load()">
           <mat-option [value]="null">{{ 'common.all' | translate }}</mat-option>
-          @for (g of groups(); track g.id) { <mat-option [value]="g.id">{{ g.name }}</mat-option> }
+          @for (c of courses(); track c.id) { <mat-option [value]="c.id">{{ c.name }}</mat-option> }
         </mat-select>
       </mat-form-field>
       <mat-form-field>
@@ -36,15 +36,16 @@ import { TimeZoneField } from '../../shared/time-zone-field';
 
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'students.level' | translate }}</th><th>{{ 'nav.groups' | translate }}</th><th>{{ 'students.teachers' | translate }}</th><th>{{ 'students.parent' | translate }}</th><th>{{ 'students.enrolled' | translate }}</th><th>{{ 'common.status' | translate }}</th><th></th></tr></thead>
+        <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'students.level' | translate }}</th><th>{{ 'students.subjects' | translate }}</th><th>{{ 'students.teachers' | translate }}</th><th>{{ 'students.parent' | translate }}</th><th>{{ 'students.payer' | translate }}</th><th>{{ 'students.enrolled' | translate }}</th><th>{{ 'common.status' | translate }}</th><th></th></tr></thead>
         <tbody>
           @for (s of students(); track s.userId) {
             <tr [class.selected]="editing()?.userId === s.userId">
               <td><a class="name" [routerLink]="['/students', s.userId]">{{ s.fullName }}</a><div class="muted ltr small">{{ s.email }}</div></td>
               <td>{{ s.level ?? '—' }}</td>
-              <td>{{ s.groups.join('، ') || '—' }}</td>
+              <td>{{ s.subjects.join('، ') || '—' }}</td>
               <td>{{ teacherNames(s) || '—' }}</td>
-              <td>{{ s.parentName ?? '—' }}</td>
+              <td>{{ s.parentName ?? ('students.noGuardian' | translate) }}</td>
+              <td>{{ s.effectivePayerUserId === s.userId ? ('students.payerSelf' | translate) : (s.payerName ?? '—') }}</td>
               <td>{{ s.enrollmentDate | date: 'mediumDate' }}</td>
               <td><span class="status" [class]="s.status">{{ 'status.' + s.status | translate }}</span></td>
               <td class="actions">
@@ -53,7 +54,7 @@ import { TimeZoneField } from '../../shared/time-zone-field';
               </td>
             </tr>
           } @empty {
-            <tr><td colspan="8" class="empty">{{ 'common.noData' | translate }}</td></tr>
+            <tr><td colspan="9" class="empty">{{ 'common.noData' | translate }}</td></tr>
           }
         </tbody>
       </table>
@@ -73,9 +74,19 @@ import { TimeZoneField } from '../../shared/time-zone-field';
             <mat-form-field>
               <mat-label>{{ 'students.parent' | translate }}</mat-label>
               <mat-select [(ngModel)]="e.parentUserId">
-                <mat-option [value]="null">—</mat-option>
+                <mat-option [value]="null">{{ 'students.noGuardian' | translate }}</mat-option>
                 @for (p of parents(); track p.userId) { <mat-option [value]="p.userId">{{ p.fullName }}</mat-option> }
               </mat-select>
+              <mat-hint>{{ 'students.guardianHint' | translate }}</mat-hint>
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>{{ 'students.payer' | translate }}</mat-label>
+              <mat-select [(ngModel)]="e.payerUserId">
+                <mat-option [value]="null">{{ 'students.payerDefault' | translate }}</mat-option>
+                <mat-option [value]="e.userId">{{ 'students.payerSelf' | translate }}</mat-option>
+                @for (p of parents(); track p.userId) { <mat-option [value]="p.userId">{{ p.fullName }}</mat-option> }
+              </mat-select>
+              <mat-hint>{{ 'students.payerHint' | translate }}</mat-hint>
             </mat-form-field>
             <app-time-zone-field [(value)]="e.timeZone" [label]="'students.timeZone' | translate" [clearLabel]="'common.remove' | translate" />
           </div>
@@ -100,16 +111,16 @@ export class StudentsPage implements OnInit {
 
   protected readonly statuses = ['Active', 'Suspended', 'Graduated', 'Withdrawn'];
   protected readonly students = signal<StudentDto[]>([]);
-  protected readonly groups = signal<GroupDto[]>([]);
+  protected readonly courses = signal<CourseDto[]>([]);
   protected readonly parents = signal<ParentDto[]>([]);
   protected readonly editing = signal<StudentDto | null>(null);
   protected search = '';
-  protected groupId: number | null = null;
+  protected courseId: number | null = null;
   protected status = '';
 
   ngOnInit(): void {
     this.load();
-    this.api.get<GroupDto[]>(`${Api.academic}/groups`).subscribe((g) => this.groups.set(g));
+    this.api.get<CourseDto[]>(`${Api.academic}/courses`).subscribe((c) => this.courses.set(c));
     if (this.canManage) {
       this.api.get<ParentDto[]>(`${Api.academic}/parents`).subscribe((p) => this.parents.set(p));
     }
@@ -117,7 +128,7 @@ export class StudentsPage implements OnInit {
 
   protected load(): void {
     this.api
-      .get<PagedResult<StudentDto>>(`${Api.academic}/students`, { search: this.search, groupId: this.groupId, status: this.status, pageSize: 100 })
+      .get<PagedResult<StudentDto>>(`${Api.academic}/students`, { search: this.search, courseId: this.courseId, status: this.status, pageSize: 100 })
       .subscribe((r) => this.students.set(r.items));
   }
 
@@ -134,11 +145,15 @@ export class StudentsPage implements OnInit {
     this.api.put(`${Api.academic}/students/${e.userId}`, body).subscribe({
       next: () =>
         this.api.put(`${Api.academic}/students/${e.userId}/parent`, { parentUserId: e.parentUserId }).subscribe({
-          next: () => {
-            this.notify.saved();
-            this.editing.set(null);
-            this.load();
-          },
+          next: () =>
+            this.api.put(`${Api.academic}/students/${e.userId}/payer`, { payerUserId: e.payerUserId }).subscribe({
+              next: () => {
+                this.notify.saved();
+                this.editing.set(null);
+                this.load();
+              },
+              error: (err) => this.notify.error(err),
+            }),
           error: (err) => this.notify.error(err),
         }),
       error: (err) => this.notify.error(err),

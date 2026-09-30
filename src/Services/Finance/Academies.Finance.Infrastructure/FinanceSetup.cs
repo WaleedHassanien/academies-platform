@@ -1,3 +1,4 @@
+using Academies.BuildingBlocks.Application.Exceptions;
 using Academies.BuildingBlocks.Infrastructure.Caching;
 using Academies.BuildingBlocks.Infrastructure.Internal;
 using Academies.BuildingBlocks.Infrastructure.Messaging;
@@ -27,6 +28,7 @@ public static class DependencyInjection
         {
             bus.AddPeopleDirectory<FinanceDbContext>(FinanceServiceInfo.Name);
             bus.AddConsumer<StudentParentChangedConsumer>();
+            bus.AddConsumer<StudentPayerChangedConsumer>();
         });
         services.AddPlatformAudit();
         services.AddEntitlements(configuration);
@@ -34,6 +36,19 @@ public static class DependencyInjection
 
         services.Configure<PaymentOptions>(configuration.GetSection(PaymentOptions.Section));
         var provider = configuration[$"{PaymentOptions.Section}:Provider"] ?? "Fake";
+        var autoPay = configuration[$"{PaymentOptions.Section}:AutoPay:Provider"] is { Length: > 0 } a
+            ? a
+            : provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase) ? "Stripe" : "Fake";
+        var usesStripe = provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase) || autoPay.Equals("Stripe", StringComparison.OrdinalIgnoreCase);
+        if (usesStripe)
+        {
+            services.AddHttpClient<StripeGateway>(c =>
+            {
+                c.BaseAddress = StripeGateway.BaseAddress;
+                c.Timeout = TimeSpan.FromSeconds(30);
+            });
+        }
+
         if (provider.Equals("PayPal", StringComparison.OrdinalIgnoreCase))
         {
             var mode = configuration[$"{PaymentOptions.Section}:PayPal:Mode"] ?? "sandbox";
@@ -43,15 +58,33 @@ public static class DependencyInjection
                 c.Timeout = TimeSpan.FromSeconds(30);
             });
         }
+        else if (provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddScoped<IPaymentGateway>(sp => sp.GetRequiredService<StripeGateway>());
+        }
         else
         {
             services.AddSingleton<IPaymentGateway, FakePaymentGateway>();
+        }
+
+        if (autoPay.Equals("Stripe", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddScoped<IAutoPayGateway>(sp => sp.GetRequiredService<StripeGateway>());
+        }
+        else if (autoPay.Equals("Fake", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<IAutoPayGateway, FakeAutoPayGateway>();
+        }
+        else
+        {
+            services.AddSingleton<IAutoPayGateway, DisabledAutoPayGateway>();
         }
 
         if (configuration.GetValue("Jobs:Enabled", true))
         {
             services.AddHostedService<PaymentReminderJob>();
             services.AddHostedService<MonthCloseJob>();
+            services.AddHostedService<AutoPayJob>();
         }
 
         return services;
@@ -83,6 +116,65 @@ internal sealed class StudentParentChangedConsumer(IGuardianSync guardians) : IC
         var m = context.Message;
         using var _ = CurrentUserOverride.Begin(SystemCurrentUser.ForAcademy(m.AcademyId));
         await guardians.SetAsync(m.AcademyId, m.StudentUserId, m.ParentUserId, context.CancellationToken);
+    }
+}
+
+/// <summary>Keeps who pays for each student, for invoices and payment notices.</summary>
+internal sealed class StudentPayerChangedConsumer(IGuardianSync guardians) : IConsumer<StudentPayerChanged>
+{
+    public async Task Consume(ConsumeContext<StudentPayerChanged> context)
+    {
+        var m = context.Message;
+        using var _ = CurrentUserOverride.Begin(SystemCurrentUser.ForAcademy(m.AcademyId));
+        await guardians.SetPayerAsync(m.AcademyId, m.StudentUserId, m.PayerUserId, context.CancellationToken);
+    }
+}
+
+/// <summary>Auto-pay switched off (Payments:AutoPay:Provider = None).</summary>
+internal sealed class DisabledAutoPayGateway : IAutoPayGateway
+{
+    public string Name => "None";
+
+    public Task<CardSetupSession> CreateCardSetupAsync(CardSetupRequest request, CancellationToken ct = default) =>
+        throw new BusinessRuleException("Automatic card payments are not enabled for this platform.");
+
+    public Task<SavedCard?> CompleteCardSetupAsync(string providerSetupId, CancellationToken ct = default) => Task.FromResult<SavedCard?>(null);
+
+    public Task<CardChargeResult> ChargeAsync(CardChargeRequest request, CancellationToken ct = default) =>
+        Task.FromResult(new CardChargeResult(false, null, "Automatic card payments are not enabled."));
+}
+
+/// <summary>Every hour: charges invoices that fell due on the payers' saved cards, academy by academy.</summary>
+internal sealed class AutoPayJob(IServiceScopeFactory scopes, ILogger<AutoPayJob> logger) : RecurringJob(scopes, logger)
+{
+    protected override TimeSpan Interval => TimeSpan.FromHours(1);
+
+    protected override async Task RunAsync(IServiceProvider services, CancellationToken ct)
+    {
+        List<long> academies;
+        using (CurrentUserOverride.Begin(SystemCurrentUser.Platform))
+        {
+            var db = services.GetRequiredService<IFinanceDbContext>();
+            academies = await db.Mandates.Where(m => m.Status == Domain.MandateStatus.Active).Select(m => m.AcademyId).Distinct().ToListAsync(ct);
+        }
+
+        foreach (var academyId in academies)
+        {
+            try
+            {
+                await using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                using var _ = CurrentUserOverride.Begin(SystemCurrentUser.ForAcademy(academyId));
+                var charged = await scope.ServiceProvider.GetRequiredService<IAutoPayService>().ChargeDueAsync(ct);
+                if (charged > 0)
+                {
+                    logger.LogInformation("Charged {Count} invoices on saved cards for academy {AcademyId}", charged, academyId);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Automatic charges failed for academy {AcademyId}", academyId);
+            }
+        }
     }
 }
 

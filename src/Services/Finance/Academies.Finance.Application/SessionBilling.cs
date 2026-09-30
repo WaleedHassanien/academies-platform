@@ -1,5 +1,6 @@
 using Academies.BuildingBlocks.Application.Abstractions;
 using Academies.BuildingBlocks.Application.Exceptions;
+using Academies.Contracts.Events;
 using Academies.Contracts.Security;
 using Academies.Finance.Domain;
 using FluentValidation;
@@ -8,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Academies.Finance.Application;
 
 // Per-session money for one-to-one teaching:
-//  - students: a price per session, prepaid (monthly package) or postpaid (billed after the month);
+//  - students: per subject, a monthly package (prepaid, e.g. 8 × 30 min) or a price per session
+//    (postpaid, billed after the month), each in its own currency;
 //  - teachers: a rate per session for each of their students, paid mid-month for chosen sessions
 //    or at the automatic month-end close for everything still unpaid.
 // Sessions and their outcomes come from Academic's ledger (IAcademicClient.LedgerAsync).
@@ -17,17 +19,32 @@ namespace Academies.Finance.Application;
 
 public sealed record TeacherRateDto(long TeacherUserId, string? TeacherName, long StudentUserId, string? StudentName, decimal RatePerSession);
 
+/// <summary><see cref="CourseId"/> null: the billing covers every subject without its own billing.</summary>
 public sealed record StudentBillingDto(
-    long StudentUserId, string Mode, decimal PricePerSession, int SessionsPerMonth, int DueDay, string Currency, IReadOnlyList<TeacherRateDto> Rates);
+    long Id, long StudentUserId, long? CourseId, string Mode, decimal PricePerSession, int SessionsPerMonth, decimal MonthlyPrice, int DueDay,
+    string Currency, long? PackageId, int? SessionMinutes, IReadOnlyList<TeacherRateDto> Rates);
 
-public sealed record SaveStudentBillingRequest(BillingMode Mode, decimal PricePerSession, int SessionsPerMonth, int DueDay = 1);
+/// <summary>
+/// With <see cref="PackageId"/> the billing is prepaid and takes the package's sessions, length, price and
+/// currency (<see cref="MonthlyPrice"/> can override the price). Otherwise: prepaid = sessions × price
+/// (or <see cref="MonthlyPrice"/>), postpaid = price per counted session. <see cref="Currency"/> defaults
+/// to the academy's.
+/// </summary>
+public sealed record SaveStudentBillingRequest(
+    BillingMode Mode, decimal PricePerSession, int SessionsPerMonth, int DueDay = 1, long? CourseId = null, long? PackageId = null,
+    string? Currency = null, decimal? MonthlyPrice = null, int? SessionMinutes = null);
 
 public sealed record SetTeacherRateRequest(decimal RatePerSession);
 
-/// <summary>The student's month at a glance: sessions that counted, package use (prepaid) or amount so far (postpaid).</summary>
+/// <summary>A billing's month at a glance: sessions that counted, package use (prepaid) or amount so far (postpaid).</summary>
 public sealed record BillingSummaryDto(
-    long StudentUserId, string Mode, decimal PricePerSession, int SessionsPerMonth, string Currency, int Year, int Month,
+    long BillingId, long StudentUserId, long? CourseId, string Mode, decimal PricePerSession, int SessionsPerMonth, string Currency, int Year, int Month,
     int CountedThisMonth, int CarriedIn, int PackageRemaining, decimal UnbilledAmount, decimal Outstanding);
+
+public sealed record PackageDto(
+    long Id, string Name, int SessionsPerMonth, int SessionMinutes, string Currency, decimal MonthlyPrice, decimal PricePerSession, bool IsActive);
+
+public sealed record SavePackageRequest(string Name, int SessionsPerMonth, int SessionMinutes, string Currency, decimal MonthlyPrice, bool IsActive = true);
 
 public sealed record UnpaidSessionDto(
     long SessionId, long StudentUserId, string? StudentName, DateTime StartsAtUtc, int DurationMinutes, string Outcome, decimal? Rate);
@@ -54,31 +71,133 @@ public sealed record InvoiceRunDto(int Created, int Updated);
 
 public sealed record MonthCloseResultDto(int Year, int Month, int Payouts, int PaidSessions, int SessionsMissingRates, int InvoicesCreated, int InvoicesUpdated);
 
+/// <summary>Which billing a session is charged to: the one for its subject, else the student's all-subjects billing.</summary>
+internal static class BillingLookup
+{
+    public static StudentBilling? For(this IEnumerable<StudentBilling> billings, long studentUserId, long courseId)
+    {
+        var mine = billings.Where(b => b.StudentUserId == studentUserId).ToList();
+        return mine.FirstOrDefault(b => b.CourseId == courseId) ?? mine.FirstOrDefault(b => b.CourseId == null);
+    }
+
+    public static bool Covers(this StudentBilling billing, IEnumerable<StudentBilling> all, LedgerSession s) =>
+        all.For(s.StudentUserId, s.CourseId)?.Id == billing.Id;
+}
+
+// ---------- Packages ----------
+
+public interface IPackageService
+{
+    Task<IReadOnlyList<PackageDto>> ListAsync(bool includeInactive, CancellationToken ct = default);
+    Task<PackageDto> CreateAsync(SavePackageRequest request, CancellationToken ct = default);
+    Task<PackageDto> UpdateAsync(long id, SavePackageRequest request, CancellationToken ct = default);
+
+    /// <summary>Adds the standard grid (8/12/16/20 sessions × 30/45/60 minutes) in one currency, priced per minute.</summary>
+    Task<IReadOnlyList<PackageDto>> CreateStandardAsync(string currency, decimal pricePerHour, CancellationToken ct = default);
+}
+
+internal sealed class PackageService(IFinanceDbContext db, IAuditTrail audit) : IPackageService
+{
+    public async Task<IReadOnlyList<PackageDto>> ListAsync(bool includeInactive, CancellationToken ct = default) =>
+        (await db.Packages.AsNoTracking().Where(p => includeInactive || p.IsActive)
+            .OrderBy(p => p.Currency).ThenBy(p => p.SessionMinutes).ThenBy(p => p.SessionsPerMonth).ToListAsync(ct))
+        .Select(ToDto).ToList();
+
+    public async Task<PackageDto> CreateAsync(SavePackageRequest request, CancellationToken ct = default)
+    {
+        var package = new Package { Name = request.Name.Trim() };
+        Apply(package, request);
+        db.Packages.Add(package);
+        await audit.RecordAsync("packages.create", nameof(Package), null, request, ct);
+        await db.SaveChangesAsync(ct);
+        return ToDto(package);
+    }
+
+    public async Task<PackageDto> UpdateAsync(long id, SavePackageRequest request, CancellationToken ct = default)
+    {
+        var package = await db.Packages.FirstOrDefaultAsync(p => p.Id == id, ct) ?? throw new NotFoundException(nameof(Package), id);
+        Apply(package, request);
+        await audit.RecordAsync("packages.update", nameof(Package), id, request, ct);
+        await db.SaveChangesAsync(ct);
+        return ToDto(package);
+    }
+
+    public async Task<IReadOnlyList<PackageDto>> CreateStandardAsync(string currency, decimal pricePerHour, CancellationToken ct = default)
+    {
+        currency = currency.ToUpperInvariant();
+        if (!Currencies.IsKnown(currency) || pricePerHour <= 0)
+        {
+            throw new BusinessRuleException("Choose a currency and a positive hourly price.");
+        }
+
+        var existing = await db.Packages.Where(p => p.Currency == currency).ToListAsync(ct);
+        foreach (var minutes in Package.StandardMinutes)
+        {
+            foreach (var sessions in Package.StandardSessions)
+            {
+                if (existing.Any(p => p.SessionMinutes == minutes && p.SessionsPerMonth == sessions))
+                {
+                    continue;
+                }
+
+                db.Packages.Add(new Package
+                {
+                    Name = $"{sessions} × {minutes} min", SessionsPerMonth = sessions, SessionMinutes = minutes, Currency = currency,
+                    MonthlyPrice = Math.Round(pricePerHour * minutes / 60m * sessions, 2),
+                });
+            }
+        }
+
+        await audit.RecordAsync("packages.standard", nameof(Package), currency, new { currency, pricePerHour }, ct);
+        await db.SaveChangesAsync(ct);
+        return await ListAsync(false, ct);
+    }
+
+    private static void Apply(Package p, SavePackageRequest r)
+    {
+        p.Name = r.Name.Trim();
+        p.SessionsPerMonth = r.SessionsPerMonth;
+        p.SessionMinutes = r.SessionMinutes;
+        p.Currency = r.Currency.ToUpperInvariant();
+        p.MonthlyPrice = r.MonthlyPrice;
+        p.IsActive = r.IsActive;
+    }
+
+    internal static PackageDto ToDto(Package p) => new(
+        p.Id, p.Name, p.SessionsPerMonth, p.SessionMinutes, p.Currency, p.MonthlyPrice,
+        p.SessionsPerMonth == 0 ? 0 : Math.Round(p.MonthlyPrice / p.SessionsPerMonth, 2), p.IsActive);
+}
+
 // ---------- Setup: prices and rates ----------
 
 public interface IBillingSetupService
 {
-    Task<StudentBillingDto?> GetStudentAsync(long studentUserId, CancellationToken ct = default);
+    Task<IReadOnlyList<StudentBillingDto>> ListStudentAsync(long studentUserId, CancellationToken ct = default);
     Task<StudentBillingDto> SaveStudentAsync(long studentUserId, SaveStudentBillingRequest request, CancellationToken ct = default);
+
+    /// <summary>Stops billing a subject: no more invoices; existing ones stay.</summary>
+    Task StopAsync(long billingId, CancellationToken ct = default);
+
     Task<IReadOnlyList<TeacherRateDto>> RatesAsync(long? teacherUserId, long? studentUserId, CancellationToken ct = default);
     Task<TeacherRateDto> SetRateAsync(long teacherUserId, long studentUserId, SetTeacherRateRequest request, CancellationToken ct = default);
-    Task<BillingSummaryDto?> SummaryAsync(long studentUserId, CancellationToken ct = default);
+    Task<IReadOnlyList<BillingSummaryDto>> SummaryAsync(long studentUserId, CancellationToken ct = default);
 }
 
 internal sealed class BillingSetupService(
     IFinanceDbContext db, FinanceAccess access, IFinanceSettingsService settings, IStudentInvoiceService invoices, IAcademicClient academic,
     IAuditTrail audit, IReportCache reports, TimeProvider clock) : IBillingSetupService
 {
-    public async Task<StudentBillingDto?> GetStudentAsync(long studentUserId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<StudentBillingDto>> ListStudentAsync(long studentUserId, CancellationToken ct = default)
     {
         await access.EnsureCanSeeStudentAsync(studentUserId, ct);
-        var billing = await db.StudentBillings.AsNoTracking().FirstOrDefaultAsync(b => b.StudentUserId == studentUserId, ct);
-        return billing is null ? null : ToDto(billing, await RatesAsync(null, studentUserId, ct));
+        var billings = await db.StudentBillings.AsNoTracking().Where(b => b.StudentUserId == studentUserId).OrderBy(b => b.CourseId).ToListAsync(ct);
+        var rates = await RatesAsync(null, studentUserId, ct);
+        return billings.Select(b => ToDto(b, rates)).ToList();
     }
 
     /// <summary>
-    /// Sets the student's price and mode. The first save creates the plan that holds their
-    /// invoices; a prepaid student is invoiced for the current month straight away.
+    /// Sets the price and mode of one subject (or all subjects). The first save creates the plan that
+    /// holds its invoices; a prepaid billing is invoiced for the current month straight away.
     /// </summary>
     public async Task<StudentBillingDto> SaveStudentAsync(long studentUserId, SaveStudentBillingRequest request, CancellationToken ct = default)
     {
@@ -88,32 +207,38 @@ internal sealed class BillingSetupService(
             throw new BusinessRuleException($"User {studentUserId} is not a student of this academy.");
         }
 
-        var monthly = request.Mode == BillingMode.Prepaid ? request.PricePerSession * request.SessionsPerMonth : 0;
-        var billing = await db.StudentBillings.FirstOrDefaultAsync(b => b.StudentUserId == studentUserId, ct);
+        var terms = await TermsAsync(request, ct);
+        var billing = await db.StudentBillings.FirstOrDefaultAsync(b => b.StudentUserId == studentUserId && b.CourseId == request.CourseId, ct);
+        var currency = terms.Currency ?? billing?.Currency ?? await settings.CurrencyAsync(ct);
         if (billing is null)
         {
-            var currency = await settings.CurrencyAsync(ct);
             var plan = new PaymentPlan
             {
-                StudentUserId = studentUserId, MonthlyAmount = monthly, Currency = currency, DueDay = request.DueDay,
+                StudentUserId = studentUserId, MonthlyAmount = terms.Monthly, Currency = currency, DueDay = request.DueDay,
                 StartDate = DateOnly.FromDateTime(AcademyCalendar.ToLocal(clock.GetUtcNow().UtcDateTime)), EndDate = new DateOnly(2099, 12, 31),
                 Notes = "Per-session billing",
             };
             db.PaymentPlans.Add(plan);
             await db.SaveChangesAsync(ct);
-            billing = new StudentBilling { StudentUserId = studentUserId, Currency = currency, PaymentPlanId = plan.Id };
+            billing = new StudentBilling { StudentUserId = studentUserId, CourseId = request.CourseId, PaymentPlanId = plan.Id };
             db.StudentBillings.Add(billing);
         }
         else
         {
             var plan = await db.PaymentPlans.FirstAsync(p => p.Id == billing.PaymentPlanId, ct);
-            plan.MonthlyAmount = monthly;
+            plan.MonthlyAmount = terms.Monthly;
             plan.DueDay = request.DueDay;
+            plan.Currency = currency;
+            plan.Status = PlanStatus.Active;
         }
 
-        billing.Mode = request.Mode;
-        billing.PricePerSession = request.PricePerSession;
-        billing.SessionsPerMonth = request.Mode == BillingMode.Prepaid ? request.SessionsPerMonth : 0;
+        billing.Mode = terms.Mode;
+        billing.PricePerSession = terms.PricePerSession;
+        billing.SessionsPerMonth = terms.Mode == BillingMode.Prepaid ? terms.Sessions : 0;
+        billing.MonthlyPrice = terms.Monthly;
+        billing.PackageId = request.PackageId;
+        billing.SessionMinutes = terms.Minutes;
+        billing.Currency = currency;
         billing.DueDay = request.DueDay;
         await audit.RecordAsync("billing.student", nameof(StudentBilling), studentUserId, request, ct);
         await db.SaveChangesAsync(ct);
@@ -126,6 +251,45 @@ internal sealed class BillingSetupService(
 
         await reports.InvalidateAsync(access.AcademyId, ct);
         return ToDto(billing, await RatesAsync(null, studentUserId, ct));
+    }
+
+    public async Task StopAsync(long billingId, CancellationToken ct = default)
+    {
+        var billing = await db.StudentBillings.FirstOrDefaultAsync(b => b.Id == billingId, ct) ?? throw new NotFoundException(nameof(StudentBilling), billingId);
+        var plan = await db.PaymentPlans.FirstAsync(p => p.Id == billing.PaymentPlanId, ct);
+        plan.Status = PlanStatus.Cancelled;
+        db.StudentBillings.Remove(billing);
+        await audit.RecordAsync("billing.stop", nameof(StudentBilling), billingId, new { billing.StudentUserId, billing.CourseId }, ct);
+        await db.SaveChangesAsync(ct);
+        await reports.InvalidateAsync(access.AcademyId, ct);
+    }
+
+    private sealed record Terms(BillingMode Mode, int Sessions, decimal Monthly, decimal PricePerSession, string? Currency, int? Minutes);
+
+    private async Task<Terms> TermsAsync(SaveStudentBillingRequest r, CancellationToken ct)
+    {
+        if (r.Currency is { } c && !Currencies.IsKnown(c))
+        {
+            throw new BusinessRuleException($"Currency must be one of {string.Join(", ", Currencies.All)}.");
+        }
+
+        if (r.PackageId is { } packageId)
+        {
+            var package = await db.Packages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == packageId, ct)
+                          ?? throw new NotFoundException(nameof(Package), packageId);
+            var monthly = r.MonthlyPrice ?? package.MonthlyPrice;
+            return new Terms(BillingMode.Prepaid, package.SessionsPerMonth, monthly, Math.Round(monthly / package.SessionsPerMonth, 2),
+                package.Currency, package.SessionMinutes);
+        }
+
+        if (r.Mode == BillingMode.Prepaid)
+        {
+            var monthly = r.MonthlyPrice ?? r.PricePerSession * r.SessionsPerMonth;
+            return new Terms(BillingMode.Prepaid, r.SessionsPerMonth, monthly, Math.Round(monthly / r.SessionsPerMonth, 2),
+                r.Currency?.ToUpperInvariant(), r.SessionMinutes);
+        }
+
+        return new Terms(BillingMode.Postpaid, 0, 0, r.PricePerSession, r.Currency?.ToUpperInvariant(), r.SessionMinutes);
     }
 
     public async Task<IReadOnlyList<TeacherRateDto>> RatesAsync(long? teacherUserId, long? studentUserId, CancellationToken ct = default)
@@ -170,46 +334,55 @@ internal sealed class BillingSetupService(
         return (await RatesAsync(teacherUserId, studentUserId, ct)).Single();
     }
 
-    public async Task<BillingSummaryDto?> SummaryAsync(long studentUserId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<BillingSummaryDto>> SummaryAsync(long studentUserId, CancellationToken ct = default)
     {
         await access.EnsureCanSeeStudentAsync(studentUserId, ct);
-        var billing = await db.StudentBillings.AsNoTracking().FirstOrDefaultAsync(b => b.StudentUserId == studentUserId, ct);
-        if (billing is null)
+        var billings = await db.StudentBillings.AsNoTracking().Where(b => b.StudentUserId == studentUserId).ToListAsync(ct);
+        if (billings.Count == 0)
         {
-            return null;
+            return [];
         }
 
         var now = clock.GetUtcNow().UtcDateTime;
         var (year, month) = AcademyCalendar.MonthOf(now);
         var (fromUtc, toUtc) = AcademyCalendar.MonthUtc(year, month);
         var ledger = await academic.LedgerAsync(access.AcademyId, fromUtc.AddDays(-180), toUtc, studentUserId: studentUserId, ct: ct);
-        var counted = ledger.Where(l => l.Counts).ToList();
-        var countedThisMonth = counted.Count(l => l.StartsAtUtc >= fromUtc);
-
         var monthStart = new DateOnly(year, month, 1);
-        var carried = await db.InvoiceLines.AsNoTracking()
-            .Where(l => l.StudentUserId == studentUserId && l.Kind == InvoiceLineKind.CarriedSessions)
-            .Join(db.StudentPayments.Where(p => p.PeriodStart == monthStart), l => l.StudentPaymentId, p => p.Id, (l, _) => l.Quantity)
-            .SumAsync(ct);
+        var result = new List<BillingSummaryDto>();
 
-        var countedIds = counted.Select(c => c.SessionId).ToList();
-        var billed = await db.InvoiceLines.AsNoTracking()
-            .Where(l => l.Kind == InvoiceLineKind.Session && l.SessionId != null && countedIds.Contains(l.SessionId.Value))
-            .Select(l => l.SessionId!.Value).ToListAsync(ct);
-        var unbilled = billing.Mode == BillingMode.Postpaid ? counted.Count(c => !billed.Contains(c.SessionId)) * billing.PricePerSession : 0;
+        foreach (var billing in billings)
+        {
+            var counted = ledger.Where(l => l.Counts && billing.Covers(billings, l)).ToList();
+            var countedThisMonth = counted.Count(l => l.StartsAtUtc >= fromUtc);
 
-        var outstanding = await db.StudentPayments.AsNoTracking()
-            .Where(p => p.StudentUserId == studentUserId && p.Status != PaymentStatus.Cancelled)
-            .SumAsync(p => (decimal?)(p.Amount - p.PaidAmount), ct) ?? 0;
+            var carried = await db.InvoiceLines.AsNoTracking()
+                .Where(l => l.StudentUserId == studentUserId && l.Kind == InvoiceLineKind.CarriedSessions)
+                .Join(db.StudentPayments.Where(p => p.PeriodStart == monthStart && p.PaymentPlanId == billing.PaymentPlanId), l => l.StudentPaymentId, p => p.Id, (l, _) => l.Quantity)
+                .SumAsync(ct);
 
-        return new BillingSummaryDto(
-            studentUserId, billing.Mode.ToString(), billing.PricePerSession, billing.SessionsPerMonth, billing.Currency, year, month,
-            countedThisMonth, carried, billing.Mode == BillingMode.Prepaid ? Math.Max(0, billing.SessionsPerMonth + carried - countedThisMonth) : 0,
-            unbilled, Math.Max(0, outstanding));
+            var countedIds = counted.Select(c => c.SessionId).ToList();
+            var billed = await db.InvoiceLines.AsNoTracking()
+                .Where(l => l.Kind == InvoiceLineKind.Session && l.SessionId != null && countedIds.Contains(l.SessionId.Value))
+                .Select(l => l.SessionId!.Value).ToListAsync(ct);
+            var unbilled = billing.Mode == BillingMode.Postpaid ? counted.Count(c => !billed.Contains(c.SessionId)) * billing.PricePerSession : 0;
+
+            var outstanding = await db.StudentPayments.AsNoTracking()
+                .Where(p => p.PaymentPlanId == billing.PaymentPlanId && p.Status != PaymentStatus.Cancelled)
+                .SumAsync(p => (decimal?)(p.Amount - p.PaidAmount), ct) ?? 0;
+
+            result.Add(new BillingSummaryDto(
+                billing.Id, studentUserId, billing.CourseId, billing.Mode.ToString(), billing.PricePerSession, billing.SessionsPerMonth, billing.Currency,
+                year, month, countedThisMonth, carried,
+                billing.Mode == BillingMode.Prepaid ? Math.Max(0, billing.SessionsPerMonth + carried - countedThisMonth) : 0,
+                unbilled, Math.Max(0, outstanding)));
+        }
+
+        return result;
     }
 
     private static StudentBillingDto ToDto(StudentBilling b, IReadOnlyList<TeacherRateDto> rates) =>
-        new(b.StudentUserId, b.Mode.ToString(), b.PricePerSession, b.SessionsPerMonth, b.DueDay, b.Currency, rates);
+        new(b.Id, b.StudentUserId, b.CourseId, b.Mode.ToString(), b.PricePerSession, b.SessionsPerMonth, b.MonthlyPrice, b.DueDay, b.Currency,
+            b.PackageId, b.SessionMinutes, rates);
 }
 
 // ---------- Student invoices ----------
@@ -217,18 +390,19 @@ internal sealed class BillingSetupService(
 public interface IStudentInvoiceService
 {
     /// <summary>
-    /// Postpaid students: an invoice for this month's counted sessions (plus any older ones not billed yet).
-    /// Prepaid students: next month's package, less deductions and plus carried sessions from this month.
+    /// Postpaid billings: an invoice for this month's counted sessions (plus any older ones not billed yet).
+    /// Prepaid billings: next month's package, less deductions and plus carried sessions from this month.
     /// Safe to run again: sessions already on an invoice are skipped.
     /// </summary>
     Task<InvoiceRunDto> GenerateAsync(int year, int month, CancellationToken ct = default);
 
-    /// <summary>Creates a prepaid student's invoice for a month if there isn't one yet; returns whether it did.</summary>
+    /// <summary>Creates a prepaid billing's invoice for a month if there isn't one yet; returns whether it did.</summary>
     Task<bool> EnsurePrepaidMonthAsync(StudentBilling billing, int year, int month, IReadOnlyList<LedgerSession> previousMonth, CancellationToken ct = default);
 }
 
 internal sealed class StudentInvoiceService(
-    IFinanceDbContext db, FinanceAccess access, IAcademicClient academic, IReportCache reports) : IStudentInvoiceService
+    IFinanceDbContext db, FinanceAccess access, IAcademicClient academic, IReportCache reports, IEventPublisher events, TimeProvider clock)
+    : IStudentInvoiceService
 {
     public async Task<InvoiceRunDto> GenerateAsync(int year, int month, CancellationToken ct = default)
     {
@@ -245,7 +419,7 @@ internal sealed class StudentInvoiceService(
 
         foreach (var billing in billings)
         {
-            var sessions = byStudent[billing.StudentUserId].ToList();
+            var sessions = byStudent[billing.StudentUserId].Where(s => billing.Covers(billings, s)).ToList();
             if (billing.Mode == BillingMode.Postpaid)
             {
                 var result = await BillPostpaidAsync(billing, year, month, sessions.Where(s => s.Counts).ToList(), ct);
@@ -273,12 +447,13 @@ internal sealed class StudentInvoiceService(
             return false;
         }
 
+        var monthly = billing.MonthlyPrice > 0 ? billing.MonthlyPrice : billing.SessionsPerMonth * billing.PricePerSession;
         var lines = new List<StudentInvoiceLine>
         {
             new()
             {
                 StudentUserId = billing.StudentUserId, Kind = InvoiceLineKind.Package, Quantity = billing.SessionsPerMonth,
-                UnitPrice = billing.PricePerSession, Amount = billing.SessionsPerMonth * billing.PricePerSession,
+                UnitPrice = billing.PricePerSession, Amount = monthly,
             },
         };
 
@@ -337,7 +512,7 @@ internal sealed class StudentInvoiceService(
 
         // Late decisions (e.g. an absence counted after the close) join the month's invoice.
         open.Amount += amount;
-        open.Status = open.ComputeStatus(DateOnly.FromDateTime(DateTime.UtcNow));
+        open.Status = open.ComputeStatus(DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime));
         foreach (var line in lines)
         {
             line.StudentPaymentId = open.Id;
@@ -348,14 +523,16 @@ internal sealed class StudentInvoiceService(
         return false;
     }
 
+    /// <summary>Creates the invoice and tells the payer about it.</summary>
     private async Task CreateInvoiceAsync(
         StudentBilling billing, DateOnly periodStart, DateOnly dueDate, decimal amount, List<StudentInvoiceLine> lines, CancellationToken ct)
     {
         var monthNumber = (await db.StudentPayments.Where(p => p.StudentUserId == billing.StudentUserId).MaxAsync(p => (int?)p.MonthNumber, ct) ?? 0) + 1;
         var invoice = new StudentPayment
         {
-            PaymentPlanId = billing.PaymentPlanId, StudentUserId = billing.StudentUserId, MonthNumber = monthNumber, PeriodStart = periodStart,
-            DueDate = dueDate, Amount = amount, Currency = billing.Currency,
+            PaymentPlanId = billing.PaymentPlanId, StudentUserId = billing.StudentUserId, CourseId = billing.CourseId, MonthNumber = monthNumber,
+            PeriodStart = periodStart, DueDate = dueDate, Amount = amount, Currency = billing.Currency,
+            LastReminderOnUtc = clock.GetUtcNow().UtcDateTime,
         };
         db.StudentPayments.Add(invoice);
         await db.SaveChangesAsync(ct);
@@ -373,6 +550,15 @@ internal sealed class StudentInvoiceService(
             Amount = amount, Currency = billing.Currency, Action = PaymentAction.Created, PaidByRole = "System",
             Note = billing.Mode == BillingMode.Prepaid ? "Monthly package" : $"{lines.Count} session(s)",
         });
+
+        if (amount > 0)
+        {
+            var payer = await access.PayerOfAsync(billing.StudentUserId, ct);
+            await events.PublishAsync(new PaymentDue(
+                invoice.AcademyId == 0 ? access.AcademyId : invoice.AcademyId, invoice.Id, billing.StudentUserId, parent is { } p ? [p] : [],
+                monthNumber, amount, dueDate, false, [payer], billing.Currency), ct);
+        }
+
         await db.SaveChangesAsync(ct);
     }
 
@@ -709,10 +895,26 @@ internal sealed class SaveStudentBillingValidator : AbstractValidator<SaveStuden
     public SaveStudentBillingValidator()
     {
         RuleFor(x => x.Mode).IsInEnum();
-        RuleFor(x => x.PricePerSession).GreaterThan(0);
-        RuleFor(x => x.SessionsPerMonth).InclusiveBetween(1, 62).When(x => x.Mode == BillingMode.Prepaid)
+        RuleFor(x => x.PricePerSession).GreaterThan(0).When(x => x.PackageId is null && !(x.Mode == BillingMode.Prepaid && x.MonthlyPrice > 0));
+        RuleFor(x => x.SessionsPerMonth).InclusiveBetween(1, 62).When(x => x.Mode == BillingMode.Prepaid && x.PackageId is null)
             .WithMessage("A prepaid package needs between 1 and 62 sessions a month.");
+        RuleFor(x => x.MonthlyPrice).GreaterThan(0).When(x => x.MonthlyPrice.HasValue);
+        RuleFor(x => x.SessionMinutes).InclusiveBetween(15, 240).When(x => x.SessionMinutes.HasValue);
+        RuleFor(x => x.Currency).Must(Currencies.IsKnown).When(x => x.Currency is not null)
+            .WithMessage($"Currency must be one of {string.Join(", ", Currencies.All)}.");
         RuleFor(x => x.DueDay).InclusiveBetween(1, 28);
+    }
+}
+
+internal sealed class SavePackageValidator : AbstractValidator<SavePackageRequest>
+{
+    public SavePackageValidator()
+    {
+        RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.SessionsPerMonth).InclusiveBetween(1, 62);
+        RuleFor(x => x.SessionMinutes).InclusiveBetween(15, 240);
+        RuleFor(x => x.Currency).Must(Currencies.IsKnown).WithMessage($"Currency must be one of {string.Join(", ", Currencies.All)}.");
+        RuleFor(x => x.MonthlyPrice).GreaterThan(0);
     }
 }
 

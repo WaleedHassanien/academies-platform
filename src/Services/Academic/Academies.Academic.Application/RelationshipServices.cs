@@ -8,20 +8,24 @@ namespace Academies.Academic.Application;
 
 public sealed record PersonRefDto(long UserId, string FullName);
 
-public sealed record GroupDto(
-    long Id, string Name, long? CourseId, string? CourseName, long? TeacherUserId, string? TeacherName, IReadOnlyList<PersonRefDto> Students);
-
-public sealed record SaveGroupRequest(string Name, long? CourseId, long? TeacherUserId);
-
 public sealed record SetMembersRequest(IReadOnlyList<long> UserIds);
 
-public sealed record CourseDto(long Id, string Name, string? Description, string? Level, bool IsActive, int MaterialCount);
+public sealed record CourseDto(long Id, string Name, string? Description, string? Level, string Kind, bool IsActive, int MaterialCount);
 
-public sealed record SaveCourseRequest(string Name, string? Description, string? Level, bool IsActive);
+public sealed record SaveCourseRequest(string Name, string? Description, string? Level, bool IsActive, CourseKind Kind = CourseKind.Other);
 
 public sealed record MaterialDto(long Id, long CourseId, string Title, string Url, string Type, DateTime CreatedOnUtc);
 
 public sealed record SaveMaterialRequest(string Title, string Url, MaterialType Type);
+
+public sealed record EnrollmentDto(
+    long Id, long StudentUserId, string? StudentName, long CourseId, string? CourseName, string CourseKind, long? TeacherUserId, string? TeacherName,
+    string Status, DateOnly StartedOn, DateOnly? EndedOn);
+
+/// <summary><see cref="StartedOn"/> defaults to today.</summary>
+public sealed record SaveEnrollmentRequest(long CourseId, long? TeacherUserId, EnrollmentStatus Status = EnrollmentStatus.Active, DateOnly? StartedOn = null);
+
+public sealed record SetTeacherCoursesRequest(IReadOnlyList<long> CourseIds);
 
 // ---------- Relationships (US-022, US-023) ----------
 
@@ -31,12 +35,11 @@ public interface IRelationshipService
     Task<IReadOnlyList<PersonRefDto>> SetSupervisorTeachersAsync(long supervisorUserId, IReadOnlyList<long> teacherUserIds, CancellationToken ct = default);
     Task<IReadOnlyList<PersonRefDto>> TeacherStudentsAsync(long teacherUserId, CancellationToken ct = default);
     Task<IReadOnlyList<PersonRefDto>> SetTeacherStudentsAsync(long teacherUserId, IReadOnlyList<long> studentUserIds, CancellationToken ct = default);
-    Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default);
-    Task<GroupDto> GetGroupAsync(long id, CancellationToken ct = default);
-    Task<GroupDto> CreateGroupAsync(SaveGroupRequest request, CancellationToken ct = default);
-    Task<GroupDto> UpdateGroupAsync(long id, SaveGroupRequest request, CancellationToken ct = default);
-    Task DeleteGroupAsync(long id, CancellationToken ct = default);
-    Task<GroupDto> SetGroupStudentsAsync(long id, IReadOnlyList<long> studentUserIds, CancellationToken ct = default);
+
+    /// <summary>The subjects a teacher may teach (empty: any).</summary>
+    Task<IReadOnlyList<long>> TeacherCoursesAsync(long teacherUserId, CancellationToken ct = default);
+
+    Task<IReadOnlyList<long>> SetTeacherCoursesAsync(long teacherUserId, IReadOnlyList<long> courseIds, CancellationToken ct = default);
 }
 
 internal sealed class RelationshipService(IAcademicDbContext db, AccessGuard guard) : IRelationshipService
@@ -85,7 +88,7 @@ internal sealed class RelationshipService(IAcademicDbContext db, AccessGuard gua
     public async Task<IReadOnlyList<PersonRefDto>> SetTeacherStudentsAsync(long teacherUserId, IReadOnlyList<long> studentUserIds, CancellationToken ct = default)
     {
         await db.People.EnsureRoleAsync(teacherUserId, Roles.Teacher, ct);
-        await EnsureStudentsAsync(studentUserIds, ct);
+        await db.EnsureStudentsAsync(studentUserIds, ct);
 
         var existing = await db.TeacherStudents.Where(t => t.TeacherUserId == teacherUserId).ToListAsync(ct);
         db.TeacherStudents.RemoveRange(existing.Where(e => !studentUserIds.Contains(e.StudentUserId)));
@@ -98,84 +101,118 @@ internal sealed class RelationshipService(IAcademicDbContext db, AccessGuard gua
         return await TeacherStudentsAsync(teacherUserId, ct);
     }
 
-    public async Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<long>> TeacherCoursesAsync(long teacherUserId, CancellationToken ct = default) =>
+        await db.TeacherCourses.AsNoTracking().Where(t => t.TeacherUserId == teacherUserId).Select(t => t.CourseId).Distinct().ToListAsync(ct);
+
+    public async Task<IReadOnlyList<long>> SetTeacherCoursesAsync(long teacherUserId, IReadOnlyList<long> courseIds, CancellationToken ct = default)
     {
-        var q = db.Groups.AsNoTracking().Include(g => g.Students).AsQueryable();
-        var visibleTeachers = await guard.VisibleTeacherIdsAsync(ct);
-        if (visibleTeachers is not null)
+        await db.People.EnsureRoleAsync(teacherUserId, Roles.Teacher, ct);
+        var wanted = courseIds.Distinct().ToList();
+        if (await db.Courses.CountAsync(c => wanted.Contains(c.Id), ct) != wanted.Count)
         {
-            var students = await guard.VisibleStudentIdsAsync(ct) ?? [];
-            q = q.Where(g => (g.TeacherUserId != null && visibleTeachers.Contains(g.TeacherUserId.Value))
-                             || g.Students.Any(s => students.Contains(s.StudentUserId)));
+            throw new BusinessRuleException("Some of the chosen subjects don't exist.");
         }
 
-        return await ToDtosAsync(await q.OrderBy(g => g.Name).ToListAsync(ct), ct);
-    }
-
-    public async Task<GroupDto> GetGroupAsync(long id, CancellationToken ct = default) =>
-        (await ToDtosAsync([await LoadGroupAsync(id, ct)], ct))[0];
-
-    public async Task<GroupDto> CreateGroupAsync(SaveGroupRequest request, CancellationToken ct = default)
-    {
-        await ValidateGroupAsync(request, ct);
-        var group = new Group { Name = request.Name.Trim(), CourseId = request.CourseId, TeacherUserId = request.TeacherUserId };
-        db.Groups.Add(group);
-        await db.SaveChangesAsync(ct);
-        return await GetGroupAsync(group.Id, ct);
-    }
-
-    public async Task<GroupDto> UpdateGroupAsync(long id, SaveGroupRequest request, CancellationToken ct = default)
-    {
-        await ValidateGroupAsync(request, ct);
-        var group = await LoadGroupAsync(id, ct);
-        group.Name = request.Name.Trim();
-        group.CourseId = request.CourseId;
-        group.TeacherUserId = request.TeacherUserId;
-        await db.SaveChangesAsync(ct);
-        return await GetGroupAsync(id, ct);
-    }
-
-    public async Task DeleteGroupAsync(long id, CancellationToken ct = default)
-    {
-        var group = await LoadGroupAsync(id, ct);
-        if (await db.Sessions.AnyAsync(s => s.GroupId == id && s.Status == SessionStatus.Scheduled, ct))
+        var existing = await db.TeacherCourses.Where(t => t.TeacherUserId == teacherUserId).ToListAsync(ct);
+        db.TeacherCourses.RemoveRange(existing.Where(e => !wanted.Contains(e.CourseId)));
+        foreach (var course in wanted.Where(c => existing.All(e => e.CourseId != c)))
         {
-            throw new BusinessRuleException("The group has scheduled sessions. Cancel or reassign them first.");
-        }
-
-        db.GroupStudents.RemoveRange(group.Students);
-        db.Groups.Remove(group);
-        await db.SaveChangesAsync(ct);
-    }
-
-    public async Task<GroupDto> SetGroupStudentsAsync(long id, IReadOnlyList<long> studentUserIds, CancellationToken ct = default)
-    {
-        await EnsureStudentsAsync(studentUserIds, ct);
-        var group = await LoadGroupAsync(id, ct);
-        db.GroupStudents.RemoveRange(group.Students.Where(s => !studentUserIds.Contains(s.StudentUserId)));
-        foreach (var student in studentUserIds.Distinct().Where(s => group.Students.All(gs => gs.StudentUserId != s)))
-        {
-            db.GroupStudents.Add(new GroupStudent { GroupId = id, StudentUserId = student });
+            db.TeacherCourses.Add(new TeacherCourse { TeacherUserId = teacherUserId, CourseId = course });
         }
 
         await db.SaveChangesAsync(ct);
-        return await GetGroupAsync(id, ct);
+        return await TeacherCoursesAsync(teacherUserId, ct);
     }
 
-    private async Task ValidateGroupAsync(SaveGroupRequest request, CancellationToken ct)
+    private async Task<IReadOnlyList<PersonRefDto>> RefsAsync(IEnumerable<long> ids, CancellationToken ct)
     {
-        if (request.CourseId is { } courseId && !await db.Courses.AnyAsync(c => c.Id == courseId, ct))
-        {
-            throw new NotFoundException(nameof(Course), courseId);
-        }
+        var names = await db.People.NamesAsync(ids, ct);
+        return names.Select(n => new PersonRefDto(n.Key, n.Value)).OrderBy(n => n.FullName).ToList();
+    }
+}
 
-        if (request.TeacherUserId is { } teacherId)
-        {
-            await db.People.EnsureRoleAsync(teacherId, Roles.Teacher, ct);
-        }
+// ---------- Enrollments: a student's subjects ----------
+
+public interface IEnrollmentService
+{
+    Task<IReadOnlyList<EnrollmentDto>> ListAsync(long studentUserId, CancellationToken ct = default);
+    Task<EnrollmentDto> AddAsync(long studentUserId, SaveEnrollmentRequest request, CancellationToken ct = default);
+    Task<EnrollmentDto> UpdateAsync(long enrollmentId, SaveEnrollmentRequest request, CancellationToken ct = default);
+}
+
+internal sealed class EnrollmentService(IAcademicDbContext db, AccessGuard guard, TimeProvider clock) : IEnrollmentService
+{
+    public async Task<IReadOnlyList<EnrollmentDto>> ListAsync(long studentUserId, CancellationToken ct = default)
+    {
+        await guard.EnsureCanViewStudentAsync(studentUserId, ct);
+        var rows = await db.Enrollments.AsNoTracking().Where(e => e.StudentUserId == studentUserId)
+            .OrderBy(e => e.Status).ThenBy(e => e.Id).ToListAsync(ct);
+        return await db.EnrollmentDtosAsync(rows, ct);
     }
 
-    private async Task EnsureStudentsAsync(IReadOnlyList<long> ids, CancellationToken ct)
+    public async Task<EnrollmentDto> AddAsync(long studentUserId, SaveEnrollmentRequest request, CancellationToken ct = default)
+    {
+        await db.EnsureStudentsAsync([studentUserId], ct);
+        if (await db.Enrollments.AnyAsync(e => e.StudentUserId == studentUserId && e.CourseId == request.CourseId && e.Status != EnrollmentStatus.Ended, ct))
+        {
+            throw new ConflictException("The student is already enrolled in this subject.");
+        }
+
+        var enrollment = new Enrollment
+        {
+            StudentUserId = studentUserId, CourseId = request.CourseId,
+            StartedOn = request.StartedOn ?? DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
+        };
+        await ApplyAsync(enrollment, request, ct);
+        db.Enrollments.Add(enrollment);
+        await db.SaveChangesAsync(ct);
+        return (await db.EnrollmentDtosAsync([enrollment], ct))[0];
+    }
+
+    public async Task<EnrollmentDto> UpdateAsync(long enrollmentId, SaveEnrollmentRequest request, CancellationToken ct = default)
+    {
+        var enrollment = await db.Enrollments.FirstOrDefaultAsync(e => e.Id == enrollmentId, ct) ?? throw new NotFoundException(nameof(Enrollment), enrollmentId);
+        if (request.CourseId != enrollment.CourseId)
+        {
+            throw new BusinessRuleException("End this enrollment and add a new one to change the subject.");
+        }
+
+        await ApplyAsync(enrollment, request, ct);
+        if (request.StartedOn is { } started)
+        {
+            enrollment.StartedOn = started;
+        }
+
+        await db.SaveChangesAsync(ct);
+        return (await db.EnrollmentDtosAsync([enrollment], ct))[0];
+    }
+
+    private async Task ApplyAsync(Enrollment enrollment, SaveEnrollmentRequest request, CancellationToken ct)
+    {
+        if (!await db.Courses.AnyAsync(c => c.Id == request.CourseId, ct))
+        {
+            throw new NotFoundException(nameof(Course), request.CourseId);
+        }
+
+        if (request.TeacherUserId is { } teacher)
+        {
+            await db.People.EnsureRoleAsync(teacher, Roles.Teacher, ct);
+            await db.EnsureTeacherQualifiedAsync(teacher, request.CourseId, ct);
+            await db.EnsureTeacherLinkAsync(teacher, enrollment.StudentUserId, ct);
+        }
+
+        enrollment.TeacherUserId = request.TeacherUserId;
+        enrollment.Status = request.Status;
+        enrollment.EndedOn = request.Status == EnrollmentStatus.Ended
+            ? enrollment.EndedOn ?? DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime)
+            : null;
+    }
+}
+
+/// <summary>Enrollment and qualification rules shared by scheduling, enrollments and lead conversion.</summary>
+internal static class EnrollmentRules
+{
+    public static async Task EnsureStudentsAsync(this IAcademicDbContext db, IReadOnlyList<long> ids, CancellationToken ct)
     {
         var distinct = ids.Distinct().ToList();
         var found = await db.Students.CountAsync(s => distinct.Contains(s.UserId), ct);
@@ -185,31 +222,58 @@ internal sealed class RelationshipService(IAcademicDbContext db, AccessGuard gua
         }
     }
 
-    private async Task<Group> LoadGroupAsync(long id, CancellationToken ct) =>
-        await db.Groups.Include(g => g.Students).FirstOrDefaultAsync(g => g.Id == id, ct) ?? throw new NotFoundException(nameof(Group), id);
-
-    private async Task<IReadOnlyList<PersonRefDto>> RefsAsync(IEnumerable<long> ids, CancellationToken ct)
+    /// <summary>A teacher with listed subjects may only teach those; one with none listed may teach any.</summary>
+    public static async Task EnsureTeacherQualifiedAsync(this IAcademicDbContext db, long teacherUserId, long courseId, CancellationToken ct)
     {
-        var names = await db.People.NamesAsync(ids, ct);
-        return names.Select(n => new PersonRefDto(n.Key, n.Value)).OrderBy(n => n.FullName).ToList();
+        var subjects = await db.TeacherCourses.Where(t => t.TeacherUserId == teacherUserId).Select(t => t.CourseId).ToListAsync(ct);
+        if (subjects.Count > 0 && !subjects.Contains(courseId))
+        {
+            throw new BusinessRuleException("This teacher doesn't teach this subject. Add it to their specialisations first.");
+        }
     }
 
-    private async Task<List<GroupDto>> ToDtosAsync(IReadOnlyList<Group> groups, CancellationToken ct)
+    /// <summary>Makes the teacher responsible for the student, if they weren't already.</summary>
+    public static async Task EnsureTeacherLinkAsync(this IAcademicDbContext db, long teacherUserId, long studentUserId, CancellationToken ct)
     {
-        var people = await db.People.NamesAsync(
-            groups.SelectMany(g => g.Students.Select(s => s.StudentUserId)).Concat(groups.Where(g => g.TeacherUserId.HasValue).Select(g => g.TeacherUserId!.Value)), ct);
-        var courseIds = groups.Where(g => g.CourseId.HasValue).Select(g => g.CourseId!.Value).Distinct().ToList();
-        var courses = await db.Courses.Where(c => courseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var tracked = db.TeacherStudents.Local.Any(t => t.TeacherUserId == teacherUserId && t.StudentUserId == studentUserId && !t.IsDeleted);
+        if (!tracked && !await db.TeacherStudents.AnyAsync(t => t.TeacherUserId == teacherUserId && t.StudentUserId == studentUserId, ct))
+        {
+            db.TeacherStudents.Add(new TeacherStudent { TeacherUserId = teacherUserId, StudentUserId = studentUserId });
+        }
+    }
 
-        return groups.Select(g => new GroupDto(
-            g.Id, g.Name, g.CourseId, g.CourseId is { } c ? courses.GetValueOrDefault(c) : null,
-            g.TeacherUserId, g.TeacherUserId is { } t ? people.GetValueOrDefault(t) : null,
-            g.Students.Select(s => new PersonRefDto(s.StudentUserId, people.GetValueOrDefault(s.StudentUserId, $"#{s.StudentUserId}"))).OrderBy(s => s.FullName).ToList()))
-            .ToList();
+    /// <summary>
+    /// Scheduling a session enrols the student in its subject (with that teacher) if they weren't
+    /// enrolled yet; an existing enrollment without a teacher gets this one.
+    /// </summary>
+    public static async Task EnsureEnrollmentAsync(this IAcademicDbContext db, long studentUserId, long courseId, long? teacherUserId, DateOnly today, CancellationToken ct)
+    {
+        var enrollment = db.Enrollments.Local.FirstOrDefault(e => e.StudentUserId == studentUserId && e.CourseId == courseId && e.Status != EnrollmentStatus.Ended)
+                         ?? await db.Enrollments.FirstOrDefaultAsync(e => e.StudentUserId == studentUserId && e.CourseId == courseId && e.Status != EnrollmentStatus.Ended, ct);
+        if (enrollment is null)
+        {
+            db.Enrollments.Add(new Enrollment { StudentUserId = studentUserId, CourseId = courseId, TeacherUserId = teacherUserId, StartedOn = today });
+        }
+        else
+        {
+            enrollment.TeacherUserId ??= teacherUserId;
+        }
+    }
+
+    public static async Task<List<EnrollmentDto>> EnrollmentDtosAsync(this IAcademicDbContext db, IReadOnlyList<Enrollment> rows, CancellationToken ct)
+    {
+        var courseIds = rows.Select(r => r.CourseId).Distinct().ToList();
+        var courses = await db.Courses.Where(c => courseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+        var names = await db.People.NamesAsync(
+            rows.Select(r => r.StudentUserId).Concat(rows.Where(r => r.TeacherUserId.HasValue).Select(r => r.TeacherUserId!.Value)), ct);
+        return rows.Select(r => new EnrollmentDto(
+            r.Id, r.StudentUserId, names.GetValueOrDefault(r.StudentUserId), r.CourseId, courses.GetValueOrDefault(r.CourseId)?.Name,
+            (courses.GetValueOrDefault(r.CourseId)?.Kind ?? CourseKind.Other).ToString(), r.TeacherUserId,
+            r.TeacherUserId is { } t ? names.GetValueOrDefault(t) : null, r.Status.ToString(), r.StartedOn, r.EndedOn)).ToList();
     }
 }
 
-// ---------- Courses and materials (US-024, US-036) ----------
+// ---------- Subjects and materials (US-024, US-036) ----------
 
 public interface ICourseService
 {
@@ -226,25 +290,30 @@ public interface ICourseService
 internal sealed class CourseService(IAcademicDbContext db) : ICourseService
 {
     public async Task<IReadOnlyList<CourseDto>> ListAsync(bool includeInactive, CancellationToken ct = default) =>
-        await db.Courses.AsNoTracking()
+        (await db.Courses.AsNoTracking()
             .Where(c => includeInactive || c.IsActive)
             .OrderBy(c => c.Name)
-            .Select(c => new CourseDto(c.Id, c.Name, c.Description, c.Level, c.IsActive, db.Materials.Count(m => m.CourseId == c.Id)))
-            .ToListAsync(ct);
+            .Select(c => new { c, Materials = db.Materials.Count(m => m.CourseId == c.Id) })
+            .ToListAsync(ct))
+        .Select(x => ToDto(x.c, x.Materials)).ToList();
 
-    public async Task<CourseDto> GetAsync(long id, CancellationToken ct = default) =>
-        await db.Courses.AsNoTracking().Where(c => c.Id == id)
-            .Select(c => new CourseDto(c.Id, c.Name, c.Description, c.Level, c.IsActive, db.Materials.Count(m => m.CourseId == c.Id)))
-            .FirstOrDefaultAsync(ct) ?? throw new NotFoundException(nameof(Course), id);
+    public async Task<CourseDto> GetAsync(long id, CancellationToken ct = default)
+    {
+        var course = await db.Courses.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct) ?? throw new NotFoundException(nameof(Course), id);
+        return ToDto(course, await db.Materials.CountAsync(m => m.CourseId == id, ct));
+    }
 
     public async Task<CourseDto> CreateAsync(SaveCourseRequest request, CancellationToken ct = default)
     {
         if (await db.Courses.AnyAsync(c => c.Name == request.Name.Trim(), ct))
         {
-            throw new ConflictException($"A course named '{request.Name}' already exists.");
+            throw new ConflictException($"A subject named '{request.Name}' already exists.");
         }
 
-        var course = new Course { Name = request.Name.Trim(), Description = request.Description, Level = request.Level, IsActive = request.IsActive };
+        var course = new Course
+        {
+            Name = request.Name.Trim(), Description = request.Description, Level = request.Level, IsActive = request.IsActive, Kind = request.Kind,
+        };
         db.Courses.Add(course);
         await db.SaveChangesAsync(ct);
         return await GetAsync(course.Id, ct);
@@ -257,6 +326,7 @@ internal sealed class CourseService(IAcademicDbContext db) : ICourseService
         course.Description = request.Description;
         course.Level = request.Level;
         course.IsActive = request.IsActive;
+        course.Kind = request.Kind;
         await db.SaveChangesAsync(ct);
         return await GetAsync(id, ct);
     }
@@ -264,9 +334,9 @@ internal sealed class CourseService(IAcademicDbContext db) : ICourseService
     public async Task DeleteAsync(long id, CancellationToken ct = default)
     {
         var course = await db.Courses.FirstOrDefaultAsync(c => c.Id == id, ct) ?? throw new NotFoundException(nameof(Course), id);
-        if (await db.Sessions.AnyAsync(s => s.CourseId == id, ct))
+        if (await db.Sessions.AnyAsync(s => s.CourseId == id, ct) || await db.Enrollments.AnyAsync(e => e.CourseId == id, ct))
         {
-            throw new BusinessRuleException("The course has sessions. Deactivate it instead of deleting.");
+            throw new BusinessRuleException("The subject has sessions or students. Deactivate it instead of deleting.");
         }
 
         db.Courses.Remove(course);
@@ -294,11 +364,9 @@ internal sealed class CourseService(IAcademicDbContext db) : ICourseService
         db.Materials.Remove(material);
         await db.SaveChangesAsync(ct);
     }
-}
 
-internal sealed class SaveGroupValidator : AbstractValidator<SaveGroupRequest>
-{
-    public SaveGroupValidator() => RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
+    private static CourseDto ToDto(Course c, int materials) =>
+        new(c.Id, c.Name, c.Description, c.Level, c.Kind.ToString(), c.IsActive, materials);
 }
 
 internal sealed class SaveCourseValidator : AbstractValidator<SaveCourseRequest>
@@ -308,6 +376,16 @@ internal sealed class SaveCourseValidator : AbstractValidator<SaveCourseRequest>
         RuleFor(x => x.Name).NotEmpty().MaximumLength(150);
         RuleFor(x => x.Description).MaximumLength(2000);
         RuleFor(x => x.Level).MaximumLength(50);
+        RuleFor(x => x.Kind).IsInEnum();
+    }
+}
+
+internal sealed class SaveEnrollmentValidator : AbstractValidator<SaveEnrollmentRequest>
+{
+    public SaveEnrollmentValidator()
+    {
+        RuleFor(x => x.CourseId).GreaterThan(0);
+        RuleFor(x => x.Status).IsInEnum();
     }
 }
 

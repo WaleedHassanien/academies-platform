@@ -301,9 +301,16 @@ public sealed record ExpenseDto(long Id, string Category, string? Description, d
 
 public sealed record MonthlyFinanceDto(string Month, decimal Revenue, decimal Salaries, decimal Expenses, decimal Net);
 
+/// <summary>
+/// Totals are in the base <see cref="Currency"/>: money received in other currencies is converted with the
+/// academy's exchange rates. <see cref="RevenueByCurrency"/> and <see cref="OutstandingByCurrency"/> show the
+/// original amounts; <see cref="MissingRates"/> lists currencies left out of the totals for lack of a rate.
+/// </summary>
 public sealed record FinanceSummaryDto(
     DateOnly From, DateOnly To, decimal Revenue, decimal Refunds, decimal Salaries, decimal Expenses, decimal Net, decimal Outstanding,
-    IReadOnlyList<MonthlyFinanceDto> Monthly, IReadOnlyDictionary<string, decimal> ExpensesByCategory, string Currency);
+    IReadOnlyList<MonthlyFinanceDto> Monthly, IReadOnlyDictionary<string, decimal> ExpensesByCategory, string Currency,
+    IReadOnlyDictionary<string, decimal>? RevenueByCurrency = null, IReadOnlyDictionary<string, decimal>? OutstandingByCurrency = null,
+    IReadOnlyList<string>? MissingRates = null);
 
 public interface IExpenseService
 {
@@ -387,10 +394,13 @@ internal sealed class ReportService(
         var fromUtc = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         var toUtc = to.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
 
+        var rates = await settings.RatesAsync(ct);
+        decimal Rate(string currency) => rates.TryGetValue(currency, out var r) ? r : 0;
+
         var logs = await db.PaymentLogs.AsNoTracking()
             .Where(l => l.CreatedOnUtc >= fromUtc && l.CreatedOnUtc < toUtc
                         && (l.Action == PaymentAction.Paid || l.Action == PaymentAction.PartiallyPaid || l.Action == PaymentAction.Refunded))
-            .Select(l => new { l.Action, l.Amount, l.CreatedOnUtc })
+            .Select(l => new { l.Action, l.Amount, l.Currency, l.CreatedOnUtc })
             .ToListAsync(ct);
         var fixedSalaries = await db.Salaries.AsNoTracking()
             .Where(s => s.Status == SalaryStatus.Paid && s.PaidOnUtc >= fromUtc && s.PaidOnUtc < toUtc)
@@ -407,31 +417,41 @@ internal sealed class ReportService(
             .ToListAsync(ct);
 
         var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
-        var outstanding = await db.StudentPayments.AsNoTracking()
+        var open = await db.StudentPayments.AsNoTracking()
             .Where(p => p.Status != PaymentStatus.Cancelled && p.Status != PaymentStatus.Paid && p.DueDate <= today)
-            .SumAsync(p => (decimal?)(p.Amount - p.PaidAmount), ct) ?? 0;
+            .Select(p => new { p.Currency, Remaining = p.Amount - p.PaidAmount })
+            .ToListAsync(ct);
+        var outstandingRows = open.Select(o => (o.Currency, o.Remaining)).ToList();
+        var outstanding = CurrencyMath.ToBase(outstandingRows, rates);
+
+        // Money received, signed (refunds negative), converted into the base currency.
+        decimal Signed(PaymentAction action, decimal amount) => action == PaymentAction.Refunded ? -amount : amount;
 
         var monthly = new List<MonthlyFinanceDto>();
         for (var m = new DateOnly(from.Year, from.Month, 1); m <= to; m = m.AddMonths(1))
         {
             var start = m.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var end = m.AddMonths(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            var revenue = logs.Where(l => l.CreatedOnUtc >= start && l.CreatedOnUtc < end)
-                .Sum(l => l.Action == PaymentAction.Refunded ? -l.Amount : l.Amount);
+            var revenue = Math.Round(logs.Where(l => l.CreatedOnUtc >= start && l.CreatedOnUtc < end).Sum(l => Signed(l.Action, l.Amount) * Rate(l.Currency)), 2);
             var paidSalaries = salaries.Where(s => s.PaidOn >= start && s.PaidOn < end).Sum(s => s.Amount);
             var spent = expenses.Where(e => e.SpentOn >= m && e.SpentOn < m.AddMonths(1)).Sum(e => e.Amount);
             monthly.Add(new MonthlyFinanceDto(m.ToString("yyyy-MM"), revenue, paidSalaries, spent, revenue - paidSalaries - spent));
         }
 
-        var gross = logs.Where(l => l.Action != PaymentAction.Refunded).Sum(l => l.Amount);
-        var refunds = logs.Where(l => l.Action == PaymentAction.Refunded).Sum(l => l.Amount);
+        var gross = CurrencyMath.ToBase(logs.Where(l => l.Action != PaymentAction.Refunded).Select(l => (l.Currency, l.Amount)), rates);
+        var refunds = CurrencyMath.ToBase(logs.Where(l => l.Action == PaymentAction.Refunded).Select(l => (l.Currency, l.Amount)), rates);
         var salaryTotal = salaries.Sum(s => s.Amount);
         var expenseTotal = expenses.Sum(e => e.Amount);
+        var missing = gross.Missing.Concat(refunds.Missing).Concat(outstanding.Missing).Distinct().Order().ToList();
 
         return new FinanceSummaryDto(
-            from, to, gross - refunds, refunds, salaryTotal, expenseTotal, gross - refunds - salaryTotal - expenseTotal, outstanding, monthly,
+            from, to, gross.Total - refunds.Total, refunds.Total, salaryTotal, expenseTotal, gross.Total - refunds.Total - salaryTotal - expenseTotal,
+            outstanding.Total, monthly,
             expenses.GroupBy(e => e.Category).ToDictionary(g => g.Key, g => g.Sum(e => e.Amount)),
-            await settings.CurrencyAsync(ct));
+            await settings.CurrencyAsync(ct),
+            CurrencyMath.ByCurrency(logs.Select(l => (l.Currency, Signed(l.Action, l.Amount)))),
+            CurrencyMath.ByCurrency(outstandingRows),
+            missing);
     }
 }
 
@@ -446,7 +466,7 @@ public interface IPaymentReminderService
     Task<int> RunAsync(CancellationToken ct = default);
 }
 
-internal sealed class PaymentReminderService(IFinanceDbContext db, IEventPublisher events, TimeProvider clock) : IPaymentReminderService
+internal sealed class PaymentReminderService(IFinanceDbContext db, FinanceAccess access, IEventPublisher events, TimeProvider clock) : IPaymentReminderService
 {
     public async Task<int> RunAsync(CancellationToken ct = default)
     {
@@ -463,6 +483,7 @@ internal sealed class PaymentReminderService(IFinanceDbContext db, IEventPublish
 
         var studentIds = due.Select(p => p.StudentUserId).Distinct().ToList();
         var guardians = await db.Guardians.Where(g => studentIds.Contains(g.StudentUserId)).ToListAsync(ct);
+        var payers = await access.PayersAsync(studentIds, ct);
 
         foreach (var payment in due)
         {
@@ -471,7 +492,8 @@ internal sealed class PaymentReminderService(IFinanceDbContext db, IEventPublish
             await events.PublishAsync(new PaymentDue(
                 payment.AcademyId, payment.Id, payment.StudentUserId,
                 guardians.Where(g => g.StudentUserId == payment.StudentUserId).Select(g => g.ParentUserId).ToList(),
-                payment.MonthNumber, payment.Remaining, payment.DueDate, payment.Status == PaymentStatus.Overdue), ct);
+                payment.MonthNumber, payment.Remaining, payment.DueDate, payment.Status == PaymentStatus.Overdue,
+                [payers[payment.StudentUserId]], payment.Currency), ct);
         }
 
         await db.SaveChangesAsync(ct);
@@ -482,10 +504,25 @@ internal sealed class PaymentReminderService(IFinanceDbContext db, IEventPublish
 public interface IGuardianSync
 {
     Task SetAsync(long academyId, long studentUserId, long? parentUserId, CancellationToken ct = default);
+
+    /// <summary>Who pays for the student (null: back to the guardian, else the student).</summary>
+    Task SetPayerAsync(long academyId, long studentUserId, long? payerUserId, CancellationToken ct = default);
 }
 
 internal sealed class GuardianSync(IFinanceDbContext db) : IGuardianSync
 {
+    public async Task SetPayerAsync(long academyId, long studentUserId, long? payerUserId, CancellationToken ct = default)
+    {
+        var existing = await db.Payers.Where(p => p.StudentUserId == studentUserId).ToListAsync(ct);
+        db.Payers.RemoveRange(existing.Where(p => p.PayerUserId != payerUserId));
+        if (payerUserId is { } payer && existing.All(p => p.PayerUserId != payer))
+        {
+            db.Payers.Add(new StudentPayer { AcademyId = academyId, StudentUserId = studentUserId, PayerUserId = payer });
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task SetAsync(long academyId, long studentUserId, long? parentUserId, CancellationToken ct = default)
     {
         var existing = await db.Guardians.Where(g => g.StudentUserId == studentUserId).ToListAsync(ct);

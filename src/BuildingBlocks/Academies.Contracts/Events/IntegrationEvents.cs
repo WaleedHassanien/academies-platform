@@ -26,7 +26,34 @@ public sealed record SessionReminderDue(long AcademyId, long SessionId, string T
 public sealed record AttendanceRecorded(
     long AcademyId, long SessionId, long StudentUserId, string Status, long? ParentUserId, DateTime SessionStartsAtUtc);
 
+/// <summary>Who pays for a student (null: back to the default, the guardian or else the student).</summary>
+public sealed record StudentPayerChanged(long AcademyId, long StudentUserId, long? PayerUserId);
+
+/// <summary>
+/// A held session's log, sent once to the guardian (or the adult student when there is none).
+/// Every log field is optional.
+/// </summary>
+public sealed record SessionReportReady(
+    long AcademyId,
+    long SessionId,
+    long StudentUserId,
+    string StudentName,
+    IReadOnlyList<long> RecipientUserIds,
+    string CourseName,
+    string TeacherName,
+    DateTime StartsAtUtc,
+    string? Attendance,
+    int? Rating,
+    string? Accomplished,
+    string? Homework,
+    string? Memorization,
+    string? Revision,
+    int? Mistakes,
+    string? Comment);
+
 // ---- Finance ----
+
+/// <summary><see cref="RecipientUserIds"/>, when set, is who to notify (the payer) instead of the student and guardians.</summary>
 public sealed record PaymentDue(
     long AcademyId,
     long StudentPaymentId,
@@ -35,10 +62,17 @@ public sealed record PaymentDue(
     int MonthNumber,
     decimal Amount,
     DateOnly DueDate,
-    bool IsOverdue);
+    bool IsOverdue,
+    IReadOnlyList<long>? RecipientUserIds = null,
+    string? Currency = null);
 
 public sealed record PaymentRecorded(
-    long AcademyId, long StudentPaymentId, long StudentUserId, IReadOnlyList<long> ParentUserIds, decimal Amount, string Action);
+    long AcademyId, long StudentPaymentId, long StudentUserId, IReadOnlyList<long> ParentUserIds, decimal Amount, string Action,
+    IReadOnlyList<long>? RecipientUserIds = null, string? Currency = null);
+
+/// <summary>A saved card was refused when an invoice was charged automatically.</summary>
+public sealed record AutoPayFailed(
+    long AcademyId, long StudentPaymentId, long StudentUserId, IReadOnlyList<long> RecipientUserIds, decimal Amount, string Currency, string? Reason);
 
 public sealed record SalaryPaid(long AcademyId, long SalaryId, long UserId, int Year, int Month, decimal Amount);
 

@@ -13,6 +13,9 @@ public static class DependencyInjection
         services.AddScoped<IWorkScheduleService, WorkScheduleService>();
         services.AddScoped<IRelationshipService, RelationshipService>();
         services.AddScoped<ICourseService, CourseService>();
+        services.AddScoped<IEnrollmentService, EnrollmentService>();
+        services.AddScoped<ILearningPlanService, LearningPlanService>();
+        services.AddScoped<ILeadService, LeadService>();
         services.AddScoped<SessionService>();
         services.AddScoped<ISessionService>(sp => sp.GetRequiredService<SessionService>());
         services.AddScoped<ISessionOutcomeService>(sp => sp.GetRequiredService<SessionService>());

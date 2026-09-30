@@ -11,19 +11,28 @@ namespace Academies.Academic.Application;
 
 // ---------- DTOs ----------
 
-/// <summary><see cref="Teachers"/> are the student's own teachers plus the teachers of their groups.</summary>
+/// <summary>
+/// <see cref="Subjects"/> are the subjects the student is actively enrolled in. <see cref="PayerUserId"/> is
+/// who was chosen to pay (null = default); <see cref="EffectivePayerUserId"/> is who actually receives invoices.
+/// </summary>
 public sealed record StudentDto(
     long UserId, string FullName, string Email, string? Level, DateOnly EnrollmentDate, string Status,
-    long? ParentUserId, string? ParentName, IReadOnlyList<string> Groups, string? TimeZone, IReadOnlyList<PersonRefDto> Teachers, int SessionMinutes);
+    long? ParentUserId, string? ParentName, IReadOnlyList<string> Subjects, string? TimeZone, IReadOnlyList<PersonRefDto> Teachers, int SessionMinutes,
+    long? PayerUserId = null, long EffectivePayerUserId = 0, string? PayerName = null);
 
-public sealed record StudentQuery(string? Search = null, long? GroupId = null, long? TeacherUserId = null, string? Status = null, int Page = 1, int PageSize = 20);
+public sealed record StudentQuery(string? Search = null, long? CourseId = null, long? TeacherUserId = null, string? Status = null, int Page = 1, int PageSize = 20);
+
+/// <summary>The student themself or a Parent-role user; null = the guardian, else the student.</summary>
+public sealed record SetPayerRequest(long? PayerUserId);
 
 /// <summary><see cref="TimeZone"/> is an IANA id such as "Asia/Riyadh"; null clears it.</summary>
 public sealed record UpdateStudentRequest(string? Level, DateOnly EnrollmentDate, StudentStatus Status, string? TimeZone = null, int? SessionMinutes = null);
 
 public sealed record SetParentRequest(long? ParentUserId);
 
-public sealed record StaffProfileDto(long UserId, string FullName, string Email, bool IsActive, string? Specialization, string? Notes, int LinkedCount);
+/// <summary><see cref="CourseIds"/>: a teacher's subjects (empty = any).</summary>
+public sealed record StaffProfileDto(
+    long UserId, string FullName, string Email, bool IsActive, string? Specialization, string? Notes, int LinkedCount, IReadOnlyList<long>? CourseIds = null);
 
 public sealed record UpdateTeacherRequest(string? Specialization, string? Bio);
 
@@ -47,6 +56,7 @@ public interface IProfileService
     Task<StudentDto> GetStudentAsync(long userId, CancellationToken ct = default);
     Task<StudentDto> UpdateStudentAsync(long userId, UpdateStudentRequest request, CancellationToken ct = default);
     Task<StudentDto> SetParentAsync(long studentUserId, long? parentUserId, CancellationToken ct = default);
+    Task<StudentDto> SetPayerAsync(long studentUserId, long? payerUserId, CancellationToken ct = default);
     Task<IReadOnlyList<StaffProfileDto>> ListTeachersAsync(CancellationToken ct = default);
     Task<StaffProfileDto> UpdateTeacherAsync(long userId, UpdateTeacherRequest request, CancellationToken ct = default);
     Task<IReadOnlyList<StaffProfileDto>> ListSupervisorsAsync(CancellationToken ct = default);
@@ -69,9 +79,9 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
             q = q.Where(s => visible.Contains(s.UserId));
         }
 
-        if (query.GroupId is { } groupId)
+        if (query.CourseId is { } courseId)
         {
-            q = q.Where(s => db.GroupStudents.Any(gs => gs.GroupId == groupId && gs.StudentUserId == s.UserId));
+            q = q.Where(s => db.Enrollments.Any(e => e.CourseId == courseId && e.StudentUserId == s.UserId && e.Status != EnrollmentStatus.Ended));
         }
 
         if (query.TeacherUserId is { } teacherId)
@@ -136,6 +146,25 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
         return await GetStudentAsync(studentUserId, ct);
     }
 
+    /// <summary>Chooses who pays: the student themself or a Parent-role user. Finance follows through an event.</summary>
+    public async Task<StudentDto> SetPayerAsync(long studentUserId, long? payerUserId, CancellationToken ct = default)
+    {
+        var student = await LoadStudentAsync(studentUserId, ct);
+        if (payerUserId is { } payer && payer != studentUserId)
+        {
+            await db.People.EnsureRoleAsync(payer, Roles.Parent, ct);
+        }
+
+        if (student.PayerUserId != payerUserId)
+        {
+            student.PayerUserId = payerUserId;
+            await events.PublishAsync(new StudentPayerChanged(student.AcademyId, studentUserId, payerUserId), ct);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return await GetStudentAsync(studentUserId, ct);
+    }
+
     public async Task<IReadOnlyList<StaffProfileDto>> ListTeachersAsync(CancellationToken ct = default)
     {
         var visible = await guard.VisibleTeacherIdsAsync(ct);
@@ -144,11 +173,13 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
             .ToListAsync(ct);
         var ids = teachers.Select(t => t.UserId).ToList();
         var people = await db.People.Where(p => ids.Contains(p.UserId)).ToDictionaryAsync(p => p.UserId, ct);
+        var subjects = (await db.TeacherCourses.AsNoTracking().Where(t => ids.Contains(t.TeacherUserId)).ToListAsync(ct))
+            .ToLookup(t => t.TeacherUserId, t => t.CourseId);
         var result = new List<StaffProfileDto>();
         foreach (var t in teachers)
         {
             var students = (await guard.TeacherStudentIdsAsync(t.UserId, ct)).Count;
-            result.Add(Staff(people, t.UserId, t.Specialization, t.Bio, students));
+            result.Add(Staff(people, t.UserId, t.Specialization, t.Bio, students) with { CourseIds = subjects[t.UserId].Distinct().ToList() });
         }
 
         return result.OrderBy(r => r.FullName).ToList();
@@ -218,7 +249,7 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
     private async Task<ParentDto> ToParentDtoAsync(Parent parent, CancellationToken ct)
     {
         var person = await db.People.FirstOrDefaultAsync(p => p.UserId == parent.UserId, ct);
-        var children = await db.Students.Where(s => s.ParentUserId == parent.UserId).ToListAsync(ct);
+        var children = await db.Students.Where(s => s.ParentUserId == parent.UserId || s.PayerUserId == parent.UserId).ToListAsync(ct);
         var names = await db.People.NamesAsync(children.Select(c => c.UserId), ct);
         return new ParentDto(
             parent.UserId, person?.FullName ?? $"#{parent.UserId}", person?.Email ?? "", parent.Occupation,
@@ -230,23 +261,22 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
 
     private async Task<List<StudentDto>> ToDtosAsync(IReadOnlyList<Student> students, CancellationToken ct)
     {
-        var ids = students.Select(s => s.UserId).Concat(students.Where(s => s.ParentUserId.HasValue).Select(s => s.ParentUserId!.Value)).ToList();
+        var ids = students.Select(s => s.UserId)
+            .Concat(students.Where(s => s.ParentUserId.HasValue).Select(s => s.ParentUserId!.Value))
+            .Concat(students.Where(s => s.PayerUserId.HasValue).Select(s => s.PayerUserId!.Value))
+            .Distinct().ToList();
         var people = await db.People.Where(p => ids.Contains(p.UserId)).ToDictionaryAsync(p => p.UserId, ct);
         var studentIds = students.Select(s => s.UserId).ToList();
-        var groups = await db.GroupStudents
-            .Where(gs => studentIds.Contains(gs.StudentUserId))
-            .Join(db.Groups, gs => gs.GroupId, g => g.Id, (gs, g) => new { gs.StudentUserId, g.Name, g.TeacherUserId })
+        var subjects = await db.Enrollments
+            .Where(e => studentIds.Contains(e.StudentUserId) && e.Status != EnrollmentStatus.Ended)
+            .Join(db.Courses, e => e.CourseId, c => c.Id, (e, c) => new { e.StudentUserId, c.Name })
             .ToListAsync(ct);
 
-        // Responsible teachers: direct teacher links plus each group's teacher (same rule as AccessGuard).
-        var direct = await db.TeacherStudents
+        var teacherLinks = await db.TeacherStudents
             .Where(t => studentIds.Contains(t.StudentUserId))
             .Select(t => new { t.StudentUserId, t.TeacherUserId })
-            .ToListAsync(ct);
-        var teacherLinks = direct
-            .Concat(groups.Where(g => g.TeacherUserId.HasValue).Select(g => new { g.StudentUserId, TeacherUserId = g.TeacherUserId!.Value }))
             .Distinct()
-            .ToList();
+            .ToListAsync(ct);
         var teacherNames = await db.People.NamesAsync(teacherLinks.Select(t => t.TeacherUserId), ct);
 
         return students.Select(s => new StudentDto(
@@ -255,13 +285,16 @@ internal sealed class ProfileService(IAcademicDbContext db, AccessGuard guard, I
             people.GetValueOrDefault(s.UserId)?.Email ?? "",
             s.Level, s.EnrollmentDate, s.Status.ToString(), s.ParentUserId,
             s.ParentUserId is { } p ? people.GetValueOrDefault(p)?.FullName : null,
-            groups.Where(g => g.StudentUserId == s.UserId).Select(g => g.Name).ToList(),
+            subjects.Where(g => g.StudentUserId == s.UserId).Select(g => g.Name).Distinct().ToList(),
             s.TimeZone,
             teacherLinks.Where(t => t.StudentUserId == s.UserId)
                 .Select(t => new PersonRefDto(t.TeacherUserId, teacherNames.GetValueOrDefault(t.TeacherUserId, $"#{t.TeacherUserId}")))
                 .OrderBy(t => t.FullName)
                 .ToList(),
-            s.SessionMinutes)).ToList();
+            s.SessionMinutes,
+            s.PayerUserId,
+            s.EffectivePayer,
+            people.GetValueOrDefault(s.EffectivePayer)?.FullName)).ToList();
     }
 
     private static StaffProfileDto Staff(Dictionary<long, BuildingBlocks.Domain.Person> people, long userId, string? specialization, string? notes, int linked)

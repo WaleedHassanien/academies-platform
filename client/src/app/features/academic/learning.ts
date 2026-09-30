@@ -1,7 +1,7 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { PagedResult } from '../../core/api/api.models';
 import { Api, ApiService } from '../../core/api/api.service';
-import { AssignmentDto, CertificateDto, CourseDto, GroupDto, StudentDto, SubmissionDto } from '../../core/api/models';
+import { AssignmentDto, CertificateDto, CourseDto, StudentDto, SubmissionDto } from '../../core/api/models';
 import { AuthService } from '../../core/auth/auth.service';
 import { Permissions, Roles } from '../../core/auth/permissions';
 import { Notifier } from '../../shared/notifier';
@@ -10,7 +10,8 @@ import { PAGE_IMPORTS } from '../../shared/page-imports';
 interface AssignmentForm {
   id: number | null;
   courseId: number | null;
-  groupId: number | null;
+  /** One student, or null for every student enrolled in the subject. */
+  studentUserId: number | null;
   title: string;
   description: string;
   due: string;
@@ -33,12 +34,12 @@ interface AssignmentForm {
           <div class="form-grid">
             <mat-form-field><mat-label>{{ 'common.title' | translate }}</mat-label><input matInput [(ngModel)]="f.title" /></mat-form-field>
             <mat-form-field>
-              <mat-label>{{ 'nav.courses' | translate }}</mat-label>
+              <mat-label>{{ 'students.subject' | translate }}</mat-label>
               <mat-select [(ngModel)]="f.courseId">@for (c of courses(); track c.id) { <mat-option [value]="c.id">{{ c.name }}</mat-option> }</mat-select>
             </mat-form-field>
             <mat-form-field>
-              <mat-label>{{ 'nav.groups' | translate }}</mat-label>
-              <mat-select [(ngModel)]="f.groupId"><mat-option [value]="null">{{ 'assignments.wholeCourse' | translate }}</mat-option>@for (g of groups(); track g.id) { <mat-option [value]="g.id">{{ g.name }}</mat-option> }</mat-select>
+              <mat-label>{{ 'roles.Student' | translate }}</mat-label>
+              <mat-select [(ngModel)]="f.studentUserId"><mat-option [value]="null">{{ 'assignments.wholeCourse' | translate }}</mat-option>@for (s of students(); track s.userId) { <mat-option [value]="s.userId">{{ s.fullName }}</mat-option> }</mat-select>
             </mat-form-field>
             <mat-form-field><mat-label>{{ 'assignments.due' | translate }}</mat-label><input matInput type="datetime-local" [(ngModel)]="f.due" /></mat-form-field>
             <mat-form-field><mat-label>{{ 'assignments.maxScore' | translate }}</mat-label><input matInput type="number" [(ngModel)]="f.maxScore" /></mat-form-field>
@@ -59,7 +60,7 @@ interface AssignmentForm {
           @for (a of assignments(); track a.id) {
             <tr [class.selected]="selected()?.id === a.id">
               <td><b>{{ a.title }}</b><div class="muted">{{ a.description }}</div></td>
-              <td>{{ a.courseName }} @if (a.groupName) { · {{ a.groupName }} }</td>
+              <td>{{ a.courseName }} @if (a.studentName) { · {{ a.studentName }} }</td>
               <td>{{ a.dueAtUtc | date: 'short' }}</td>
               <td>
                 @if (isStudent) {
@@ -128,7 +129,7 @@ export class AssignmentsPage implements OnInit {
 
   protected readonly assignments = signal<AssignmentDto[]>([]);
   protected readonly courses = signal<CourseDto[]>([]);
-  protected readonly groups = signal<GroupDto[]>([]);
+  protected readonly students = signal<StudentDto[]>([]);
   protected readonly form = signal<AssignmentForm | null>(null);
   protected readonly selected = signal<AssignmentDto | null>(null);
   protected readonly submissions = signal<SubmissionDto[]>([]);
@@ -141,20 +142,20 @@ export class AssignmentsPage implements OnInit {
     this.load();
     if (this.isTeacher) {
       this.api.get<CourseDto[]>(`${Api.academic}/courses`).subscribe((c) => this.courses.set(c));
-      this.api.get<GroupDto[]>(`${Api.academic}/groups`).subscribe((g) => this.groups.set(g));
+      this.api.get<PagedResult<StudentDto>>(`${Api.academic}/students`, { pageSize: 100, status: 'Active' }).subscribe((r) => this.students.set(r.items));
     }
   }
 
   protected edit(a: AssignmentDto | null): void {
     this.form.set(
       a
-        ? { id: a.id, courseId: a.courseId, groupId: a.groupId, title: a.title, description: a.description ?? '', due: a.dueAtUtc.slice(0, 16), maxScore: a.maxScore }
-        : { id: null, courseId: null, groupId: null, title: '', description: '', due: '', maxScore: 100 },
+        ? { id: a.id, courseId: a.courseId, studentUserId: a.studentUserId, title: a.title, description: a.description ?? '', due: a.dueAtUtc.slice(0, 16), maxScore: a.maxScore }
+        : { id: null, courseId: null, studentUserId: null, title: '', description: '', due: '', maxScore: 100 },
     );
   }
 
   protected save(f: AssignmentForm): void {
-    const body = { courseId: f.courseId, groupId: f.groupId, title: f.title, description: f.description || null, dueAtUtc: new Date(f.due).toISOString(), maxScore: f.maxScore };
+    const body = { courseId: f.courseId, studentUserId: f.studentUserId, title: f.title, description: f.description || null, dueAtUtc: new Date(f.due).toISOString(), maxScore: f.maxScore };
     const request = f.id ? this.api.put(`${Api.academic}/assignments/${f.id}`, body) : this.api.post(`${Api.academic}/assignments`, body);
     request.subscribe({ next: () => this.after(() => this.form.set(null)), error: (e) => this.notify.error(e) });
   }

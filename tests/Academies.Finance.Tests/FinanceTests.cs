@@ -14,6 +14,7 @@ public sealed class FinanceTests : IAsyncLifetime
     private const long Academy = 1, Teacher = 10, Supervisor = 11, StudentA = 20, StudentB = 21, ParentA = 30, ParentB = 31, Accountant = 40;
 
     private readonly FakeAcademic _academic = new();
+    private readonly TestCardGateway _cards = new();
     private ServiceHarness<FinanceDbContext> _h = null!;
 
     public async ValueTask InitializeAsync()
@@ -23,6 +24,7 @@ public sealed class FinanceTests : IAsyncLifetime
             s.AddScoped<IFinanceDbContext>(sp => sp.GetRequiredService<FinanceDbContext>());
             s.AddSingleton<IAcademicClient>(_academic);
             s.AddSingleton<IPaymentGateway, TestGateway>();
+            s.AddSingleton<IAutoPayGateway>(_cards);
             s.AddFinanceApplication();
         });
 
@@ -192,7 +194,7 @@ public sealed class FinanceTests : IAsyncLifetime
         (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentA))).Currency.ShouldBe(Currencies.EGP);
         (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentB))).Months.Single().Currency.ShouldBe(Currencies.USD);
         await Should.ThrowAsync<BusinessRuleException>(() =>
-            _h.RunAsync<IFinanceSettingsService>(s => s.SaveAsync(new SaveFinanceSettingsRequest("SAR"))));
+            _h.RunAsync<IFinanceSettingsService>(s => s.SaveAsync(new SaveFinanceSettingsRequest("XYZ"))));
     }
 
     [Fact]
@@ -315,8 +317,8 @@ public sealed class FinanceTests : IAsyncLifetime
         Session(4, StudentB, Sep(14), "Excused", "CarriedOver");
         Session(5, StudentB, Sep(20), "Excused", "NotCounted");
 
-        var summary = await _h.RunAsync<IBillingSetupService, BillingSummaryDto?>(s => s.SummaryAsync(StudentB));
-        summary!.CountedThisMonth.ShouldBe(2);
+        var summary = (await _h.RunAsync<IBillingSetupService, IReadOnlyList<BillingSummaryDto>>(s => s.SummaryAsync(StudentB))).Single();
+        summary.CountedThisMonth.ShouldBe(2);
         summary.PackageRemaining.ShouldBe(6);
 
         await _h.RunAsync<IStudentInvoiceService>(s => s.GenerateAsync(2026, 9));
@@ -330,9 +332,151 @@ public sealed class FinanceTests : IAsyncLifetime
 
         // In October the carried session tops up the package.
         _h.Clock.Now = new DateTimeOffset(2026, 10, 5, 10, 0, 0, TimeSpan.Zero);
-        var oct = await _h.RunAsync<IBillingSetupService, BillingSummaryDto?>(s => s.SummaryAsync(StudentB));
-        oct!.CarriedIn.ShouldBe(1);
+        var oct = (await _h.RunAsync<IBillingSetupService, IReadOnlyList<BillingSummaryDto>>(s => s.SummaryAsync(StudentB))).Single();
+        oct.CarriedIn.ShouldBe(1);
         oct.PackageRemaining.ShouldBe(9);
+    }
+
+    // ---------- Packages, subjects, currencies, payers and auto-pay ----------
+
+    private const long Quran = 101, Arabic = 102;
+
+    private void SubjectSession(long id, long student, DateTime at, long course, string outcome = "Held") =>
+        _academic.Ledger.Add(new LedgerSession(id, Teacher, student, at, 30, outcome, outcome is "Held" or "AbsentCounted", null, null, course));
+
+    [Fact]
+    public async Task Each_subject_has_its_own_billing_package_and_currency()
+    {
+        _h.Clock.Now = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+        var packages = await _h.RunAsync<IPackageService, IReadOnlyList<PackageDto>>(s => s.CreateStandardAsync("usd", 10));
+        packages.Count.ShouldBe(12);
+        var eightByThirty = packages.Single(p => p.SessionsPerMonth == 8 && p.SessionMinutes == 30);
+        eightByThirty.MonthlyPrice.ShouldBe(40);   // 8 × half an hour at 10 USD an hour
+        eightByThirty.Currency.ShouldBe("USD");
+
+        // Quran on a USD package (prepaid, invoiced now); Arabic per session in SAR (postpaid).
+        var quran = await _h.RunAsync<IBillingSetupService, StudentBillingDto>(s =>
+            s.SaveStudentAsync(StudentA, new SaveStudentBillingRequest(BillingMode.Prepaid, 0, 0, 1, Quran, eightByThirty.Id)));
+        quran.Currency.ShouldBe("USD");
+        quran.PricePerSession.ShouldBe(5);
+        await _h.RunAsync<IBillingSetupService>(s =>
+            s.SaveStudentAsync(StudentA, new SaveStudentBillingRequest(BillingMode.Postpaid, 50, 0, 1, Arabic, Currency: "SAR")));
+        (await _h.RunAsync<IBillingSetupService, IReadOnlyList<StudentBillingDto>>(s => s.ListStudentAsync(StudentA))).Count.ShouldBe(2);
+
+        SubjectSession(1, StudentA, Sep(3), Quran);
+        SubjectSession(2, StudentA, Sep(4), Arabic);
+        SubjectSession(3, StudentA, Sep(11), Arabic);
+        await _h.RunAsync<IStudentInvoiceService>(s => s.GenerateAsync(2026, 9));
+
+        var months = (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentA))).Months;
+        months.Single(m => m.Currency == "SAR").Amount.ShouldBe(100);   // only the two Arabic sessions
+        months.Where(m => m.Currency == "USD").Select(m => m.Amount).ShouldBe([40, 40]);   // September now, October ahead
+
+        var summaries = await _h.RunAsync<IBillingSetupService, IReadOnlyList<BillingSummaryDto>>(s => s.SummaryAsync(StudentA));
+        summaries.Single(s => s.CourseId == Quran).PackageRemaining.ShouldBe(7);
+    }
+
+    [Fact]
+    public async Task The_payer_gets_the_invoices_and_can_see_them()
+    {
+        // Parent B pays for Student A (Parent A stays the guardian).
+        await _h.RunAsync<IGuardianSync>(s => s.SetPayerAsync(Academy, StudentA, ParentB));
+        await _h.RunAsync<IBillingSetupService>(s => s.SaveStudentAsync(StudentA, new SaveStudentBillingRequest(BillingMode.Prepaid, 80, 8)));
+
+        var due = _h.Events.OfType<Contracts.Events.PaymentDue>().ShouldHaveSingleItem();
+        due.RecipientUserIds.ShouldBe([ParentB]);
+        due.Currency.ShouldBe(Currencies.EGP);
+
+        _h.User.As(ParentB, Academy, Roles.Parent);
+        (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentA))).Months.ShouldHaveSingleItem();
+
+        // Back to the default: the guardian pays again, and Parent B no longer sees Student A.
+        _h.User.As(Accountant, Academy, Roles.Accountant);
+        await _h.RunAsync<IGuardianSync>(s => s.SetPayerAsync(Academy, StudentA, null));
+        _h.User.As(ParentB, Academy, Roles.Parent);
+        await Should.ThrowAsync<ForbiddenAccessException>(() => _h.RunAsync<IPaymentPlanService>(s => s.StudentPaymentsAsync(StudentA)));
+    }
+
+    [Fact]
+    public async Task A_saved_card_pays_due_invoices_and_a_refusal_is_retried_then_reported()
+    {
+        _h.Clock.Now = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+        await _h.RunAsync<IBillingSetupService>(s => s.SaveStudentAsync(StudentA, new SaveStudentBillingRequest(BillingMode.Prepaid, 80, 8, DueDay: 1)));
+
+        // Only the payer (the guardian here) or finance staff can save a card.
+        _h.User.As(ParentB, Academy, Roles.Parent);
+        await Should.ThrowAsync<ForbiddenAccessException>(() => _h.RunAsync<IAutoPayService>(s => s.StartSetupAsync(StudentA)));
+        _h.User.As(ParentA, Academy, Roles.Parent);
+        var setup = await _h.RunAsync<IAutoPayService, AutoPaySetupDto>(s => s.StartSetupAsync(StudentA));
+        (await _h.RunAsync<IAutoPayService, AutoPayDto?>(s => s.GetAsync(StudentA)))!.Status.ShouldBe("Pending");
+
+        _h.User.As(0, Academy);
+        await _h.RunAsync<IAutoPayService>(s => s.CompleteSetupAsync(setup.Reference, setup.Reference));
+        _h.User.As(ParentA, Academy, Roles.Parent);
+        var card = (await _h.RunAsync<IAutoPayService, AutoPayDto?>(s => s.GetAsync(StudentA)))!;
+        card.Status.ShouldBe("Active");
+        card.CardLast4.ShouldBe("4242");
+
+        // The job charges September's package; nothing is left to charge after that.
+        _h.User.As(0, Academy);
+        (await _h.RunAsync<IAutoPayService, int>(s => s.ChargeDueAsync())).ShouldBe(1);
+        (await _h.RunAsync<IAutoPayService, int>(s => s.ChargeDueAsync())).ShouldBe(0);
+        _h.User.As(Accountant, Academy, Roles.Accountant);
+        (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(StudentA))).Months.Single().Status.ShouldBe("Paid");
+
+        // October's renewal is refused: the payer is told, and it is retried a day later, at most three times.
+        await _h.RunAsync<IStudentInvoiceService>(s => s.GenerateAsync(2026, 9));
+        _h.Clock.Now = new DateTimeOffset(2026, 10, 1, 10, 0, 0, TimeSpan.Zero);
+        _cards.Refuse = true;
+        _h.User.As(0, Academy);
+        (await _h.RunAsync<IAutoPayService, int>(s => s.ChargeDueAsync())).ShouldBe(0);
+        _h.Events.OfType<Contracts.Events.AutoPayFailed>().ShouldHaveSingleItem().RecipientUserIds.ShouldBe([ParentA]);
+        await _h.RunAsync<IAutoPayService>(s => s.ChargeDueAsync());   // same day: not retried
+        _cards.Charges.ShouldBe(2);
+        for (var day = 2; day <= 5; day++)
+        {
+            _h.Clock.Now = new DateTimeOffset(2026, 10, day, 10, 0, 0, TimeSpan.Zero);
+            await _h.RunAsync<IAutoPayService>(s => s.ChargeDueAsync());
+        }
+
+        _cards.Charges.ShouldBe(4);   // 1 success + 3 tries
+    }
+
+    [Fact]
+    public async Task Report_adds_other_currencies_with_the_academy_rates()
+    {
+        await _h.RunAsync<IFinanceSettingsService>(s => s.SaveAsync(new SaveFinanceSettingsRequest("EGP", new Dictionary<string, decimal> { ["USD"] = 50 })));
+        await _h.RunAsync<IPaymentPlanService>(s => s.CreateAsync(new CreatePaymentPlanRequest(StudentA, 1000, new DateOnly(2026, 9, 1), 1)));
+        await _h.RunAsync<IPaymentPlanService>(s => s.CreateAsync(new CreatePaymentPlanRequest(StudentB, 20, new DateOnly(2026, 9, 1), 1, Currency: "USD")));
+        await _h.RunAsync<IPaymentPlanService>(s => s.CreateAsync(new CreatePaymentPlanRequest(StudentB, 10, new DateOnly(2026, 9, 1), 1, Currency: "GBP")));
+        foreach (var student in new[] { StudentA, StudentB })
+        {
+            foreach (var month in (await _h.RunAsync<IPaymentPlanService, StudentPaymentsDto>(s => s.StudentPaymentsAsync(student))).Months)
+            {
+                await _h.RunAsync<IPaymentService>(s => s.RecordAsync(month.Id, new RecordPaymentRequest(month.Amount, PaymentMethod.Cash, null, null)));
+            }
+        }
+
+        var report = await _h.RunAsync<IReportService, FinanceSummaryDto>(s => s.SummaryAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30)));
+        report.Currency.ShouldBe("EGP");
+        report.Revenue.ShouldBe(2000);   // 1000 EGP + 20 USD × 50; GBP has no rate
+        report.RevenueByCurrency!["GBP"].ShouldBe(10);
+        report.MissingRates.ShouldBe(["GBP"]);
+    }
+
+    [Fact]
+    public void Stripe_webhook_signatures_are_checked()
+    {
+        const string secret = "whsec_test", body = "{\"type\":\"checkout.session.completed\"}";
+        var now = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+        var t = now.ToUnixTimeSeconds();
+        var sig = Convert.ToHexStringLower(System.Security.Cryptography.HMACSHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(secret), System.Text.Encoding.UTF8.GetBytes($"{t}.{body}")));
+
+        Infrastructure.Payments.StripeGateway.VerifySignature($"t={t},v1={sig}", body, secret, now).ShouldBeTrue();
+        Infrastructure.Payments.StripeGateway.VerifySignature($"t={t},v1={sig}", body + " ", secret, now).ShouldBeFalse();
+        Infrastructure.Payments.StripeGateway.VerifySignature($"t={t},v1={sig}", body, secret, now.AddMinutes(10)).ShouldBeFalse();
+        Infrastructure.Payments.StripeGateway.VerifySignature(null, body, secret, now).ShouldBeFalse();
     }
 
     private async Task SetPayAsync()
@@ -356,6 +500,26 @@ public sealed class FinanceTests : IAsyncLifetime
                 .Where(l => teacherUserId == null || l.TeacherUserId == teacherUserId)
                 .Where(l => studentUserId == null || l.StudentUserId == studentUserId)
                 .ToList());
+    }
+
+    private sealed class TestCardGateway : IAutoPayGateway
+    {
+        public bool Refuse { get; set; }
+        public int Charges { get; private set; }
+
+        public string Name => "TestCard";
+
+        public Task<CardSetupSession> CreateCardSetupAsync(CardSetupRequest request, CancellationToken ct = default) =>
+            Task.FromResult(new CardSetupSession(request.Reference, $"https://cards.test/{request.Reference}"));
+
+        public Task<SavedCard?> CompleteCardSetupAsync(string providerSetupId, CancellationToken ct = default) =>
+            Task.FromResult<SavedCard?>(new SavedCard(providerSetupId, "cus_1", "pm_1", "visa", "4242"));
+
+        public Task<CardChargeResult> ChargeAsync(CardChargeRequest request, CancellationToken ct = default)
+        {
+            Charges++;
+            return Task.FromResult(Refuse ? new CardChargeResult(false, null, "Your card was declined.") : new CardChargeResult(true, "pi_1", null));
+        }
     }
 
     private sealed class TestGateway : IPaymentGateway

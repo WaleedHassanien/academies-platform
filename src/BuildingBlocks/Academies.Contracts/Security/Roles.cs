@@ -13,6 +13,9 @@ public static class Roles
     public const string Accountant = "Accountant";
     public const string Staff = "Staff";
 
+    /// <summary>Sales and customer service: leads, trial sessions and new sign-ups.</summary>
+    public const string Sales = "Sales";
+
     public static readonly IReadOnlyList<string> All =
-        [SuperAdmin, Admin, Manager, Supervisor, Teacher, Student, Parent, Accountant, Staff];
+        [SuperAdmin, Admin, Manager, Supervisor, Teacher, Student, Parent, Accountant, Staff, Sales];
 }

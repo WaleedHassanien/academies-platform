@@ -16,7 +16,7 @@ public static class RolePermissionDefaults
             Permissions.Users.View, Permissions.Profiles.View, Permissions.Profiles.Manage,
             Permissions.Courses.View, Permissions.Courses.Manage, Permissions.Sessions.View,
             Permissions.Sessions.Manage, Permissions.Attendance.View, Permissions.Feedback.View,
-            Permissions.Reports.View, Permissions.Dashboards.View,
+            Permissions.Reports.View, Permissions.Dashboards.View, Permissions.Leads.View, Permissions.Leads.Manage,
         ],
         [Roles.Supervisor] =
         [
@@ -38,5 +38,10 @@ public static class RolePermissionDefaults
             Permissions.Reports.View,
         ],
         [Roles.Staff] = [Permissions.Salaries.View],
+        [Roles.Sales] =
+        [
+            Permissions.Leads.View, Permissions.Leads.Manage, Permissions.Courses.View, Permissions.Sessions.View,
+            Permissions.Salaries.View,
+        ],
     };
 }

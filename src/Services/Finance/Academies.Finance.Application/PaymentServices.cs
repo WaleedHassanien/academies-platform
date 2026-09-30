@@ -13,7 +13,8 @@ namespace Academies.Finance.Application;
 
 // ---------- DTOs ----------
 
-public sealed record CreatePaymentPlanRequest(long StudentUserId, decimal MonthlyAmount, DateOnly StartDate, int Months, int DueDay = 1, string? Notes = null);
+public sealed record CreatePaymentPlanRequest(
+    long StudentUserId, decimal MonthlyAmount, DateOnly StartDate, int Months, int DueDay = 1, string? Notes = null, string? Currency = null);
 
 public sealed record PaymentPlanDto(
     long Id, long StudentUserId, string? StudentName, decimal MonthlyAmount, string Currency, DateOnly StartDate, DateOnly EndDate, int DueDay,
@@ -65,7 +66,7 @@ internal sealed class PaymentPlanService(
             throw new BusinessRuleException($"User {request.StudentUserId} is not a student of this academy.");
         }
 
-        var currency = await settings.CurrencyAsync(ct);
+        var currency = request.Currency?.ToUpperInvariant() ?? await settings.CurrencyAsync(ct);
         var plan = new PaymentPlan
         {
             StudentUserId = request.StudentUserId,
@@ -236,7 +237,8 @@ internal sealed class PaymentService(
             MonthNumber = payment.MonthNumber, Amount = amount, Currency = payment.Currency, Action = action, PaidByRole = paidByRole, Method = method,
             Reference = reference, Note = note,
         });
-        await events.PublishAsync(new PaymentRecorded(payment.AcademyId, payment.Id, payment.StudentUserId, parents, amount, action.ToString()), ct);
+        await events.PublishAsync(new PaymentRecorded(
+            payment.AcademyId, payment.Id, payment.StudentUserId, parents, amount, action.ToString(), [await access.PayerOfAsync(payment.StudentUserId, ct)], payment.Currency), ct);
         await audit.RecordAsync("payments.record", nameof(StudentPayment), payment.Id, new { amount, method, reference }, ct);
         await db.SaveChangesAsync(ct);
         await reports.InvalidateAsync(payment.AcademyId, ct);
@@ -261,7 +263,9 @@ internal sealed class PaymentService(
             StudentPaymentId = payment.Id, StudentUserId = payment.StudentUserId, ParentUserId = parents.Count > 0 ? parents[0] : null,
             MonthNumber = payment.MonthNumber, Amount = request.Amount, Currency = payment.Currency, Action = PaymentAction.Refunded, PaidByRole = access.PrimaryRole, Note = request.Note,
         });
-        await events.PublishAsync(new PaymentRecorded(payment.AcademyId, payment.Id, payment.StudentUserId, parents, request.Amount, nameof(PaymentAction.Refunded)), ct);
+        await events.PublishAsync(new PaymentRecorded(
+            payment.AcademyId, payment.Id, payment.StudentUserId, parents, request.Amount, nameof(PaymentAction.Refunded),
+            [await access.PayerOfAsync(payment.StudentUserId, ct)], payment.Currency), ct);
         await audit.RecordAsync("payments.refund", nameof(StudentPayment), payment.Id, request, ct);
         await db.SaveChangesAsync(ct);
         await reports.InvalidateAsync(payment.AcademyId, ct);
@@ -406,6 +410,8 @@ internal sealed class CreatePaymentPlanValidator : AbstractValidator<CreatePayme
         RuleFor(x => x.Months).InclusiveBetween(1, 60);
         RuleFor(x => x.DueDay).InclusiveBetween(1, 28);
         RuleFor(x => x.Notes).MaximumLength(500);
+        RuleFor(x => x.Currency).Must(Currencies.IsKnown).When(x => x.Currency is not null)
+            .WithMessage($"Currency must be one of {string.Join(", ", Currencies.All)}.");
     }
 }
 

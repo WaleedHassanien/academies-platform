@@ -13,10 +13,11 @@ namespace Academies.Academic.Tests;
 
 public sealed class AcademicTests : IAsyncLifetime
 {
-    private const long Academy = 3, Admin = 1, TeacherA = 10, TeacherB = 11, StudentA = 20, StudentB = 21, ParentA = 30, ParentB = 31;
+    private const long Academy = 3, Admin = 1, TeacherA = 10, TeacherB = 11, StudentA = 20, StudentB = 21, AdultStudent = 22,
+        ParentA = 30, ParentB = 31, SalesUser = 50;
 
     private ServiceHarness<AcademicDbContext> _h = null!;
-    private long _courseId, _groupId;
+    private long _courseId, _arabicId;
 
     public async ValueTask InitializeAsync()
     {
@@ -36,23 +37,22 @@ public sealed class AcademicTests : IAsyncLifetime
                 PeopleSeed.Person(Academy, TeacherB, "Teacher B", Roles.Teacher),
                 PeopleSeed.Person(Academy, StudentA, "Student A", Roles.Student),
                 PeopleSeed.Person(Academy, StudentB, "Student B", Roles.Student),
+                PeopleSeed.Person(Academy, AdultStudent, "Adult Student", Roles.Student),
                 PeopleSeed.Person(Academy, ParentA, "Parent A", Roles.Parent),
-                PeopleSeed.Person(Academy, ParentB, "Parent B", Roles.Parent));
+                PeopleSeed.Person(Academy, ParentB, "Parent B", Roles.Parent),
+                PeopleSeed.Person(Academy, SalesUser, "Sales", Roles.Sales));
             db.Students.AddRange(
                 new Student { AcademyId = Academy, UserId = StudentA, ParentUserId = ParentA, EnrollmentDate = new DateOnly(2026, 1, 1) },
-                new Student { AcademyId = Academy, UserId = StudentB, ParentUserId = ParentB, EnrollmentDate = new DateOnly(2026, 1, 1) });
+                new Student { AcademyId = Academy, UserId = StudentB, ParentUserId = ParentB, EnrollmentDate = new DateOnly(2026, 1, 1) },
+                new Student { AcademyId = Academy, UserId = AdultStudent, EnrollmentDate = new DateOnly(2026, 1, 1) });
             db.Teachers.AddRange(new Teacher { AcademyId = Academy, UserId = TeacherA }, new Teacher { AcademyId = Academy, UserId = TeacherB });
 
-            var course = new Course { AcademyId = Academy, Name = "Quran" };
-            db.Courses.Add(course);
+            var quran = new Course { AcademyId = Academy, Name = "Quran", Kind = CourseKind.Quran };
+            var arabic = new Course { AcademyId = Academy, Name = "Arabic", Kind = CourseKind.Arabic };
+            db.Courses.AddRange(quran, arabic);
             await db.SaveChangesAsync();
-            _courseId = course.Id;
-
-            var group = new Group { AcademyId = Academy, Name = "G1", CourseId = course.Id, TeacherUserId = TeacherA };
-            group.Students.Add(new GroupStudent { AcademyId = Academy, StudentUserId = StudentA });
-            db.Groups.Add(group);
-            await db.SaveChangesAsync();
-            _groupId = group.Id;
+            _courseId = quran.Id;
+            _arabicId = arabic.Id;
         });
 
         _h.User.As(Admin, Academy, Roles.Admin);
@@ -60,21 +60,25 @@ public sealed class AcademicTests : IAsyncLifetime
 
     public async ValueTask DisposeAsync() => await _h.DisposeAsync();
 
-    private SaveSessionRequest Slot(DateTime start, long teacher = TeacherA, long? group = null, int weeks = 1) =>
-        new("Lesson", _courseId, group ?? _groupId, teacher, start, 60, SessionType.Offline, "Room 1", null, false, null, weeks);
+    private SaveSessionRequest Slot(DateTime start, long teacher = TeacherA, long student = StudentA, int weeks = 1, int minutes = 60) =>
+        new("Lesson", _courseId, teacher, student, start, minutes, RepeatWeeks: weeks);
+
+    private async Task<SessionDto> ScheduleAsync(SaveSessionRequest request) =>
+        (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s => s.CreateAsync(request))).Single();
 
     [Fact]
-    public async Task Teacher_cannot_be_double_booked()   // US-025
+    public async Task Teacher_and_student_cannot_be_double_booked()   // US-025
     {
         var start = new DateTime(2026, 9, 20, 16, 0, 0, DateTimeKind.Utc);
-        await _h.RunAsync<ISessionService>(s => s.CreateAsync(Slot(start)));
+        await ScheduleAsync(Slot(start));
 
-        await Should.ThrowAsync<ConflictException>(() =>
-            _h.RunAsync<ISessionService>(s => s.CreateAsync(Slot(start.AddMinutes(30), group: null) with { GroupId = null })));
+        // Same teacher, another student, overlapping: refused. The student with another teacher: refused.
+        await Should.ThrowAsync<ConflictException>(() => ScheduleAsync(Slot(start.AddMinutes(30), student: StudentB)));
+        await Should.ThrowAsync<ConflictException>(() => ScheduleAsync(Slot(start.AddMinutes(30), teacher: TeacherB)));
 
-        // The next hour, or another teacher at the same time, is fine.
-        await _h.RunAsync<ISessionService>(s => s.CreateAsync(Slot(start.AddHours(1))));
-        await _h.RunAsync<ISessionService>(s => s.CreateAsync(Slot(start, teacher: TeacherB) with { GroupId = null }));
+        // The next hour, or another teacher with another student at the same time, is fine.
+        await ScheduleAsync(Slot(start.AddHours(1)));
+        await ScheduleAsync(Slot(start, teacher: TeacherB, student: StudentB));
     }
 
     [Fact]
@@ -85,6 +89,7 @@ public sealed class AcademicTests : IAsyncLifetime
 
         created.Count.ShouldBe(4);
         created.Select(c => c.StartsAtUtc.Day).ShouldBe([1, 8, 15, 22]);
+        created.ShouldAllBe(c => c.MeetingUrl != null && c.CourseKind == "Quran");
     }
 
     [Fact]
@@ -92,14 +97,33 @@ public sealed class AcademicTests : IAsyncLifetime
     {
         _h.User.As(TeacherA, Academy, Roles.Teacher);
         await Should.ThrowAsync<ForbiddenAccessException>(() =>
-            _h.RunAsync<ISessionService>(s => s.CreateAsync(Slot(new DateTime(2026, 9, 25, 9, 0, 0, DateTimeKind.Utc), teacher: TeacherB) with { GroupId = null })));
+            ScheduleAsync(Slot(new DateTime(2026, 9, 25, 9, 0, 0, DateTimeKind.Utc), teacher: TeacherB)));
+    }
+
+    [Fact]
+    public async Task Scheduling_enrolls_the_student_and_respects_the_teachers_subjects()
+    {
+        await ScheduleAsync(Slot(new DateTime(2026, 9, 20, 16, 0, 0, DateTimeKind.Utc)));
+        var enrollments = await _h.RunAsync<IEnrollmentService, IReadOnlyList<EnrollmentDto>>(e => e.ListAsync(StudentA));
+        enrollments.ShouldHaveSingleItem().TeacherUserId.ShouldBe(TeacherA);
+
+        // A second subject for the same student.
+        await _h.RunAsync<IEnrollmentService>(e => e.AddAsync(StudentA, new SaveEnrollmentRequest(_arabicId, TeacherB)));
+        (await _h.RunAsync<IProfileService, StudentDto>(p => p.GetStudentAsync(StudentA))).Subjects.ShouldBe(["Quran", "Arabic"], ignoreOrder: true);
+        await Should.ThrowAsync<ConflictException>(() =>
+            _h.RunAsync<IEnrollmentService>(e => e.AddAsync(StudentA, new SaveEnrollmentRequest(_arabicId, null))));
+
+        // Teacher B teaches Arabic only, so can't take a Quran session.
+        await _h.RunAsync<IRelationshipService>(r => r.SetTeacherCoursesAsync(TeacherB, [_arabicId]));
+        await Should.ThrowAsync<BusinessRuleException>(() =>
+            ScheduleAsync(Slot(new DateTime(2026, 9, 21, 16, 0, 0, DateTimeKind.Utc), teacher: TeacherB, student: StudentB)));
+        await ScheduleAsync(Slot(new DateTime(2026, 9, 21, 16, 0, 0, DateTimeKind.Utc), teacher: TeacherB, student: StudentB) with { CourseId = _arabicId });
     }
 
     [Fact]
     public async Task Attendance_publishes_events_and_awards_points_then_session_completes()   // US-026, US-042
     {
-        var session = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s =>
-            s.CreateAsync(Slot(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc))))).Single();
+        var session = await ScheduleAsync(Slot(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc)));
 
         _h.User.As(TeacherA, Academy, Roles.Teacher);
         var roster = await _h.RunAsync<ISessionService, IReadOnlyList<RosterItemDto>>(s =>
@@ -117,6 +141,10 @@ public sealed class AcademicTests : IAsyncLifetime
             s.RecordAttendanceAsync(session.Id, new RecordAttendanceRequest([new AttendanceItem(StudentA, AttendanceStatus.Absent, "sick")])));
         (await _h.RunAsync<IGamificationService, StudentPointsDto>(g => g.GetAsync(StudentA))).Total.ShouldBe(0);
 
+        // Only this session's student can be on the roster.
+        await Should.ThrowAsync<BusinessRuleException>(() => _h.RunAsync<ISessionService>(s =>
+            s.RecordAttendanceAsync(session.Id, new RecordAttendanceRequest([new AttendanceItem(StudentB, AttendanceStatus.Present, null)]))));
+
         var completed = await _h.RunAsync<ISessionService, SessionDto>(s => s.CompleteAsync(session.Id));
         completed.Status.ShouldBe("Completed");
         _h.Events.OfType<SessionCompleted>().ShouldHaveSingleItem().TeacherUserId.ShouldBe(TeacherA);
@@ -125,20 +153,23 @@ public sealed class AcademicTests : IAsyncLifetime
     [Fact]
     public async Task Future_sessions_cannot_be_completed()
     {
-        var session = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s =>
-            s.CreateAsync(Slot(new DateTime(2026, 12, 1, 16, 0, 0, DateTimeKind.Utc))))).Single();
+        var session = await ScheduleAsync(Slot(new DateTime(2026, 12, 1, 16, 0, 0, DateTimeKind.Utc)));
         await Should.ThrowAsync<BusinessRuleException>(() => _h.RunAsync<ISessionService>(s => s.CompleteAsync(session.Id)));
     }
 
     [Fact]
-    public async Task Feedback_is_visible_to_the_student_and_their_parent_only()   // US-027
+    public async Task Session_log_is_visible_to_the_student_and_their_parent_only()   // US-027
     {
-        var session = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s =>
-            s.CreateAsync(Slot(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc))))).Single();
-        await _h.RunAsync<ISessionService>(s => s.SaveFeedbackAsync(session.Id, new SaveFeedbackRequest([new FeedbackItem(StudentA, 5, "Excellent")])));
+        var session = await ScheduleAsync(Slot(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc)));
+        await _h.RunAsync<ISessionService>(s => s.SaveFeedbackAsync(session.Id, new SaveFeedbackRequest(
+            [new FeedbackItem(StudentA, 5, "Excellent", "Al-Mulk 1-5", "Revise 1-5", Memorization: "Al-Mulk 1-5", Mistakes: 2)])));
 
         _h.User.As(ParentA, Academy, Roles.Parent);
-        (await _h.RunAsync<ISessionService, IReadOnlyList<FeedbackDto>>(s => s.StudentFeedbackAsync(StudentA, 10))).Single().Rating.ShouldBe(5);
+        var log = (await _h.RunAsync<ISessionService, IReadOnlyList<FeedbackDto>>(s => s.StudentFeedbackAsync(StudentA, 10))).Single();
+        log.Rating.ShouldBe(5);
+        log.Log!.Memorization.ShouldBe("Al-Mulk 1-5");
+        log.Log.Mistakes.ShouldBe(2);
+        log.CourseName.ShouldBe("Quran");
 
         _h.User.As(StudentA, Academy, Roles.Student);
         (await _h.RunAsync<ISessionService, IReadOnlyList<FeedbackDto>>(s => s.StudentFeedbackAsync(StudentA, 10))).ShouldHaveSingleItem();
@@ -151,9 +182,140 @@ public sealed class AcademicTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_session_report_goes_once_to_the_guardian_or_to_the_adult_student()
+    {
+        var past = new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc);
+        var child = await ScheduleAsync(Slot(past));
+        var adult = await ScheduleAsync(Slot(past, teacher: TeacherB, student: AdultStudent));
+
+        // Completed without a log: nothing yet. Writing the log sends it.
+        await _h.RunAsync<ISessionService>(s => s.CompleteAsync(child.Id));
+        _h.Events.OfType<SessionReportReady>().ShouldBeEmpty();
+        await _h.RunAsync<ISessionService>(s => s.SaveFeedbackAsync(child.Id, new SaveFeedbackRequest(
+            [new FeedbackItem(StudentA, 4, null, "Tajweed rules", "Page 3")])));
+        var report = _h.Events.OfType<SessionReportReady>().ShouldHaveSingleItem();
+        report.RecipientUserIds.ShouldBe([ParentA]);
+        report.Accomplished.ShouldBe("Tajweed rules");
+        report.CourseName.ShouldBe("Quran");
+
+        // Editing the log later doesn't send it again.
+        await _h.RunAsync<ISessionService>(s => s.SaveFeedbackAsync(child.Id, new SaveFeedbackRequest([new FeedbackItem(StudentA, 5, null)])));
+        _h.Events.OfType<SessionReportReady>().Count().ShouldBe(1);
+
+        // Log first, then completion: sent on completion, to the student themself (no guardian).
+        await _h.RunAsync<ISessionService>(s => s.SaveFeedbackAsync(adult.Id, new SaveFeedbackRequest([new FeedbackItem(AdultStudent, null, "Good work")])));
+        _h.Events.OfType<SessionReportReady>().Count().ShouldBe(1);
+        await _h.RunAsync<ISessionService>(s => s.CompleteAsync(adult.Id));
+        _h.Events.OfType<SessionReportReady>().Last().RecipientUserIds.ShouldBe([AdultStudent]);
+
+        // An empty log is refused.
+        var validator = new SaveFeedbackValidator();
+        (await validator.ValidateAsync(new SaveFeedbackRequest([new FeedbackItem(StudentA, null, " ")]), TestContext.Current.CancellationToken))
+            .IsValid.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task The_teacher_writes_one_active_plan_per_subject_and_the_family_reads_it()
+    {
+        await ScheduleAsync(Slot(new DateTime(2026, 9, 20, 16, 0, 0, DateTimeKind.Utc)));
+
+        _h.User.As(TeacherA, Academy, Roles.Teacher);
+        var first = await _h.RunAsync<ILearningPlanService, LearningPlanDto>(p => p.CreateAsync(StudentA, new SaveLearningPlanRequest(
+            _courseId, "Memorise Juz Amma", "Juz 30", "5 lines per session", new DateOnly(2027, 1, 31))));
+        first.TeacherUserId.ShouldBe(TeacherA);
+        var second = await _h.RunAsync<ILearningPlanService, LearningPlanDto>(p => p.CreateAsync(StudentA, new SaveLearningPlanRequest(
+            _courseId, "Memorise Juz Tabarak", "Juz 29", "half a page", null)));
+
+        // Another teacher can't write it.
+        _h.User.As(TeacherB, Academy, Roles.Teacher);
+        await Should.ThrowAsync<ForbiddenAccessException>(() => _h.RunAsync<ILearningPlanService>(p =>
+            p.CreateAsync(StudentA, new SaveLearningPlanRequest(_courseId, "x", null, null, null))));
+
+        _h.User.As(ParentA, Academy, Roles.Parent);
+        var plans = await _h.RunAsync<ILearningPlanService, IReadOnlyList<LearningPlanDto>>(p => p.ListAsync(StudentA));
+        plans.Single(p => p.Id == second.Id).Status.ShouldBe("Active");
+        plans.Single(p => p.Id == first.Id).Status.ShouldBe("Closed");
+
+        _h.User.As(ParentB, Academy, Roles.Parent);
+        await Should.ThrowAsync<ForbiddenAccessException>(() => _h.RunAsync<ILearningPlanService>(p => p.ListAsync(StudentA)));
+    }
+
+    [Fact]
+    public async Task The_payer_defaults_to_the_guardian_and_can_be_changed()
+    {
+        var student = await _h.RunAsync<IProfileService, StudentDto>(p => p.GetStudentAsync(StudentA));
+        student.EffectivePayerUserId.ShouldBe(ParentA);
+        (await _h.RunAsync<IProfileService, StudentDto>(p => p.GetStudentAsync(AdultStudent))).EffectivePayerUserId.ShouldBe(AdultStudent);
+
+        // Parent B pays for Student A (e.g. one relative paying for several children) and now sees them.
+        var changed = await _h.RunAsync<IProfileService, StudentDto>(p => p.SetPayerAsync(StudentA, ParentB));
+        changed.EffectivePayerUserId.ShouldBe(ParentB);
+        changed.PayerName.ShouldBe("Parent B");
+        _h.Events.OfType<StudentPayerChanged>().ShouldHaveSingleItem().PayerUserId.ShouldBe(ParentB);
+
+        _h.User.As(ParentB, Academy, Roles.Parent);
+        (await _h.RunAsync<IProfileService, StudentDto>(p => p.GetStudentAsync(StudentA))).UserId.ShouldBe(StudentA);
+
+        // A teacher can't be a payer.
+        _h.User.As(Admin, Academy, Roles.Admin);
+        await Should.ThrowAsync<BusinessRuleException>(() => _h.RunAsync<IProfileService>(p => p.SetPayerAsync(StudentA, TeacherA)));
+    }
+
+    [Fact]
+    public async Task A_trial_holds_the_teachers_slot_and_conversion_creates_the_student()
+    {
+        _h.User.As(SalesUser, Academy, Roles.Sales);
+        var lead = await _h.RunAsync<ILeadService, LeadDto>(l => l.CreateAsync(new SaveLeadRequest(
+            "Yusuf", "+441234", null, "UK", "Europe/London", false, "Maryam", _courseId, "WhatsApp", null, null, null)));
+        lead.Status.ShouldBe("New");
+        lead.AssignedToUserId.ShouldBe(SalesUser);
+
+        var trialAt = _h.Clock.Now.UtcDateTime.AddDays(1);
+        lead = await _h.RunAsync<ILeadService, LeadDto>(l => l.ScheduleTrialAsync(lead.Id, new ScheduleTrialRequest(TeacherA, null, trialAt, 30)));
+        lead.Status.ShouldBe("TrialScheduled");
+        lead.Trial!.TeacherName.ShouldBe("Teacher A");
+        (await _h.RunAsync<ILeadService, JoinLinkDto>(l => l.TrialJoinLinkAsync(lead.Id))).Url.ShouldContain("Yusuf");
+
+        // The teacher's slot is taken for regular sessions too.
+        _h.User.As(Admin, Academy, Roles.Admin);
+        await Should.ThrowAsync<ConflictException>(() => ScheduleAsync(Slot(trialAt.AddMinutes(10))));
+
+        // The teacher sees it and records the outcome once it happened.
+        _h.User.As(TeacherA, Academy, Roles.Teacher);
+        (await _h.RunAsync<IOverviewService, MyOverviewDto>(o => o.MineAsync())).Teacher!.Trials!.ShouldHaveSingleItem();
+        await Should.ThrowAsync<BusinessRuleException>(() => _h.RunAsync<ILeadService>(l =>
+            l.RecordTrialOutcomeAsync(lead.Id, new TrialOutcomeRequest(TrialStatus.Attended, "Beginner"))));
+        _h.Clock.Now = _h.Clock.Now.AddDays(2);
+        lead = await _h.RunAsync<ILeadService, LeadDto>(l => l.RecordTrialOutcomeAsync(lead.Id, new TrialOutcomeRequest(TrialStatus.Attended, "Beginner")));
+        lead.Status.ShouldBe("TrialDone");
+
+        // Sales converts it with the new accounts (made in Identity; not in the people directory yet).
+        const long NewStudent = 60, NewParent = 61;
+        _h.User.As(SalesUser, Academy, Roles.Sales);
+        lead = await _h.RunAsync<ILeadService, LeadDto>(l => l.ConvertAsync(lead.Id, new ConvertLeadRequest(NewStudent, NewParent)));
+        lead.Status.ShouldBe("Converted");
+        _h.Events.OfType<StudentParentChanged>().ShouldContain(e => e.StudentUserId == NewStudent && e.ParentUserId == NewParent);
+
+        _h.User.As(Admin, Academy, Roles.Admin);
+        await _h.SeedAsync(db =>
+        {
+            var student = db.Students.Single(s => s.UserId == NewStudent);
+            student.TimeZone.ShouldBe("Europe/London");
+            student.ParentUserId.ShouldBe(NewParent);
+            db.Enrollments.Single(e => e.StudentUserId == NewStudent).TeacherUserId.ShouldBe(TeacherA);
+            db.TeacherStudents.Any(t => t.StudentUserId == NewStudent && t.TeacherUserId == TeacherA).ShouldBeTrue();
+            return Task.CompletedTask;
+        });
+
+        // A lost lead needs a reason; a converted one can't change.
+        _h.User.As(SalesUser, Academy, Roles.Sales);
+        await Should.ThrowAsync<BusinessRuleException>(() => _h.RunAsync<ILeadService>(l => l.SetStatusAsync(lead.Id, new SetLeadStatusRequest(LeadStatus.Lost, "price"))));
+    }
+
+    [Fact]
     public async Task Role_dashboards_show_only_own_data()   // US-028, US-040
     {
-        await _h.RunAsync<ISessionService>(s => s.CreateAsync(Slot(_h.Clock.Now.UtcDateTime.AddDays(1))));
+        await ScheduleAsync(Slot(_h.Clock.Now.UtcDateTime.AddDays(1)));
 
         _h.User.As(TeacherA, Academy, Roles.Teacher);
         var teacher = await _h.RunAsync<IOverviewService, MyOverviewDto>(o => o.MineAsync());
@@ -202,21 +364,14 @@ public sealed class AcademicTests : IAsyncLifetime
     [Fact]
     public async Task Student_page_shows_their_sessions_teachers_and_time_zone()
     {
-        // Teacher B also teaches Student A one-to-one (no group).
-        await _h.SeedAsync(async db =>
-        {
-            db.TeacherStudents.Add(new TeacherStudent { AcademyId = Academy, TeacherUserId = TeacherB, StudentUserId = StudentA });
-            await db.SaveChangesAsync();
-        });
-        var groupSession = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s =>
-            s.CreateAsync(Slot(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc))))).Single();
-        await _h.RunAsync<ISessionService>(s => s.CreateAsync(Slot(new DateTime(2026, 9, 15, 16, 0, 0, DateTimeKind.Utc), teacher: TeacherB) with { GroupId = null }));
+        var first = await ScheduleAsync(Slot(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc)));
+        await ScheduleAsync(Slot(new DateTime(2026, 9, 15, 16, 0, 0, DateTimeKind.Utc), teacher: TeacherB));
         await _h.RunAsync<ISessionService>(s =>
-            s.RecordAttendanceAsync(groupSession.Id, new RecordAttendanceRequest([new AttendanceItem(StudentA, AttendanceStatus.Late, null)])));
+            s.RecordAttendanceAsync(first.Id, new RecordAttendanceRequest([new AttendanceItem(StudentA, AttendanceStatus.Late, null)])));
 
         var sessions = await _h.RunAsync<ISessionService, IReadOnlyList<StudentSessionDto>>(s => s.StudentSessionsAsync(StudentA));
         sessions.Select(x => x.Session.TeacherUserId).ShouldBe([TeacherB, TeacherA]);   // newest first
-        sessions.Single(x => x.Session.Id == groupSession.Id).AttendanceStatus.ShouldBe("Late");
+        sessions.Single(x => x.Session.Id == first.Id).AttendanceStatus.ShouldBe("Late");
         (await _h.RunAsync<ISessionService, IReadOnlyList<StudentSessionDto>>(s => s.StudentSessionsAsync(StudentB))).ShouldBeEmpty();
 
         var student = await _h.RunAsync<IProfileService, StudentDto>(p =>
@@ -230,28 +385,24 @@ public sealed class AcademicTests : IAsyncLifetime
     }
 
     private SaveSessionRequest Solo(DateTime start, long student = StudentB, int minutes = 45) =>
-        new("Hifz", _courseId, null, TeacherA, start, minutes, SessionType.Online, null, null, false, null, 1, student);
+        new("Hifz", _courseId, TeacherA, student, start, minutes);
 
     [Fact]
-    public async Task One_to_one_sessions_link_the_teacher_and_have_a_single_student_roster()
+    public async Task Sessions_link_the_teacher_and_have_a_single_student_roster()
     {
-        var session = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s => s.CreateAsync(Solo(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc))))).Single();
+        var session = await ScheduleAsync(Solo(new DateTime(2026, 9, 14, 16, 0, 0, DateTimeKind.Utc)));
         session.StudentUserId.ShouldBe(StudentB);
         session.DurationMinutes.ShouldBe(45);
 
         (await _h.RunAsync<ISessionService, IReadOnlyList<RosterItemDto>>(s => s.RosterAsync(session.Id))).Select(r => r.StudentUserId).ShouldBe([StudentB]);
         (await _h.RunAsync<IProfileService, StudentDto>(p => p.GetStudentAsync(StudentB))).Teachers.Select(t => t.UserId).ShouldBe([TeacherA]);
-
-        // The student can't be booked twice at the same time, even with another teacher.
-        await Should.ThrowAsync<ConflictException>(() => _h.RunAsync<ISessionService>(s =>
-            s.CreateAsync(Solo(new DateTime(2026, 9, 14, 16, 30, 0, DateTimeKind.Utc)) with { TeacherUserId = TeacherB })));
     }
 
     [Fact]
     public async Task Excused_session_is_rescheduled_and_the_ledger_counts_only_what_was_held()
     {
         var future = _h.Clock.Now.UtcDateTime.AddDays(2);
-        var session = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s => s.CreateAsync(Solo(future)))).Single();
+        var session = await ScheduleAsync(Solo(future));
 
         // Another student can't excuse it; the student can.
         _h.User.As(StudentA, Academy, Roles.Student);
@@ -277,13 +428,14 @@ public sealed class AcademicTests : IAsyncLifetime
         ledger[0].Counts.ShouldBeFalse();
         ledger[1].MakeupOfSessionId.ShouldBe(session.Id);
         ledger[1].DurationMinutes.ShouldBe(45);
+        ledger[1].CourseId.ShouldBe(_courseId);
     }
 
     [Fact]
     public async Task Supervisor_decides_whether_an_unexcused_absence_counts()
     {
         var past = new DateTime(2026, 9, 10, 16, 0, 0, DateTimeKind.Utc);
-        var session = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s => s.CreateAsync(Solo(past)))).Single();
+        var session = await ScheduleAsync(Solo(past));
         await _h.RunAsync<ISessionService>(s => s.RecordAttendanceAsync(session.Id, new RecordAttendanceRequest([new AttendanceItem(StudentB, AttendanceStatus.Absent, null)])));
         await _h.RunAsync<ISessionService>(s => s.CompleteAsync(session.Id));
 
@@ -320,11 +472,9 @@ public sealed class AcademicTests : IAsyncLifetime
     public async Task Each_teacher_has_one_private_room_even_at_the_same_hour()
     {
         var start = _h.Clock.Now.UtcDateTime.AddMinutes(20);
-        var a = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s => s.CreateAsync(Solo(start, StudentB) with { GenerateMeetingLink = true }))).Single();
-        var b = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s =>
-            s.CreateAsync(Solo(start, StudentA) with { TeacherUserId = TeacherB, GenerateMeetingLink = true }))).Single();
-        var later = (await _h.RunAsync<ISessionService, IReadOnlyList<SessionDto>>(s =>
-            s.CreateAsync(Solo(start.AddDays(1), StudentB) with { GenerateMeetingLink = true }))).Single();
+        var a = await ScheduleAsync(Solo(start, StudentB));
+        var b = await ScheduleAsync(Solo(start, StudentA) with { TeacherUserId = TeacherB });
+        var later = await ScheduleAsync(Solo(start.AddDays(1), StudentB));
 
         a.MeetingUrl.ShouldNotBe(b.MeetingUrl);   // two teachers at once: two rooms
         later.MeetingUrl.ShouldBe(a.MeetingUrl);  // same teacher: always the same room

@@ -1,3 +1,4 @@
+using Academies.BuildingBlocks.Application.Exceptions;
 using Academies.BuildingBlocks.Application.Models;
 using Academies.BuildingBlocks.Infrastructure.Security;
 using Academies.Contracts.Security;
@@ -36,6 +37,30 @@ public sealed class UsersController(IUserService users) : ControllerBase
     [HasPermission(Permissions.Users.Manage)]
     public async Task<ActionResult<ApiResponse<UserDto>>> Create(CreateUserRequest request, CancellationToken ct) =>
         Ok(ApiResponse<UserDto>.Ok(await users.CreateAsync(request, ct)));
+
+    /// <summary>Sales looks up student and parent accounts (e.g. a sibling's parent) when signing up a lead.</summary>
+    [HttpGet("accounts")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<PagedResult<UserDto>>>> Accounts([FromQuery] string? search, [FromQuery] string role, CancellationToken ct) =>
+        Ok(ApiResponse<PagedResult<UserDto>>.Ok(await users.ListAsync(new UserQuery(search, SignupRole(role), true, PageSize: 20), ct)));
+
+    /// <summary>Sales creates the student (and parent) accounts of a new sign-up; no other roles.</summary>
+    [HttpPost("accounts")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<UserDto>>> CreateAccount(CreateUserRequest request, CancellationToken ct)
+    {
+        if (request.Roles.Count != 1)
+        {
+            throw new BusinessRuleException("A sign-up account is a student or a parent.");
+        }
+
+        return Ok(ApiResponse<UserDto>.Ok(await users.CreateAsync(request with { Roles = [SignupRole(request.Roles[0])], AcademyId = null }, ct)));
+    }
+
+    private static string SignupRole(string role) =>
+        role.Equals(Roles.Student, StringComparison.OrdinalIgnoreCase) ? Roles.Student
+        : role.Equals(Roles.Parent, StringComparison.OrdinalIgnoreCase) ? Roles.Parent
+        : throw new BusinessRuleException("A sign-up account is a student or a parent.");
 
     [HttpPut("{id:long}")]
     [HasPermission(Permissions.Users.Manage)]

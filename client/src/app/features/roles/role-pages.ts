@@ -4,10 +4,11 @@ import { TranslateService } from '@ngx-translate/core';
 import { PagedResult } from '../../core/api/api.models';
 import { Api, ApiService } from '../../core/api/api.service';
 import {
-  CheckoutDto, LeaderboardEntry, MyEarningsDto, MyOverviewDto, NotificationDto, SalaryLogDto, SessionDto, StudentOverviewDto, StudentPaymentsDto,
-  StudentPointsDto, WorkDayDto,
+  CheckoutDto, LeaderboardEntry, MyEarningsDto, MyOverviewDto, NotificationDto, SalaryLogDto, SessionDto, StudentDto, StudentOverviewDto,
+  StudentPaymentsDto, StudentPointsDto, TrialDto, TrialStatus, WorkDayDto,
 } from '../../core/api/models';
 import { BillingCard } from '../../shared/billing-card';
+import { LearningCard } from '../../shared/learning-card';
 import { MySessions, SessionActions } from '../../shared/sessions-kit';
 import { AuthService } from '../../core/auth/auth.service';
 import { Permissions, Roles } from '../../core/auth/permissions';
@@ -28,8 +29,7 @@ import { Stat } from '../../shared/ui';
             <td>{{ s.startsAtUtc | date: 'EEE d MMM, HH:mm' }}</td>
             <td><b>{{ s.title }}</b><div class="muted">{{ s.courseName }} · {{ s.teacherName }}</div></td>
             <td>
-              @if (s.meetingUrl && s.status === 'Scheduled') { <button mat-button (click)="actions.join(s)"><mat-icon>videocam</mat-icon>{{ 'sessions.join' | translate }}</button> }
-              @else { {{ s.location }} }
+              @if (s.status === 'Scheduled') { <button mat-button (click)="actions.join(s)"><mat-icon>videocam</mat-icon>{{ 'sessions.join' | translate }}</button> }
             </td>
           </tr>
         } @empty {
@@ -62,7 +62,13 @@ export class SessionList {
       <table class="data-table">
         <tbody>
           @for (f of s.recentFeedback; track f.id) {
-            <tr><td>{{ f.sessionStartsAtUtc | date: 'mediumDate' }}</td><td>{{ f.sessionTitle }}</td><td>{{ stars(f.rating) }}</td><td>{{ f.comment }}</td><td class="muted">{{ f.teacherName }}</td></tr>
+            <tr>
+              <td>{{ f.sessionStartsAtUtc | date: 'mediumDate' }}</td>
+              <td>{{ f.courseName ?? f.sessionTitle }}@if (f.log?.accomplished) { <div class="muted">{{ f.log?.accomplished }}</div> }</td>
+              <td>{{ stars(f.rating) }}</td>
+              <td>{{ f.comment }}@if (f.log?.homework) { <div class="muted">{{ 'log.homework' | translate }}: {{ f.log?.homework }}</div> }</td>
+              <td class="muted">{{ f.teacherName }}</td>
+            </tr>
           } @empty { <tr><td class="empty">{{ 'common.noData' | translate }}</td></tr> }
         </tbody>
       </table>
@@ -72,8 +78,8 @@ export class SessionList {
 export class StudentCard {
   readonly student = input.required<StudentOverviewDto>();
 
-  protected stars(n: number): string {
-    return '★'.repeat(n) + '☆'.repeat(5 - n);
+  protected stars(n: number | null): string {
+    return n ? '★'.repeat(n) + '☆'.repeat(5 - n) : '';
   }
 }
 
@@ -103,6 +109,34 @@ export class StudentCard {
           }
         }
       </div>
+
+      @if (t.trials?.length) {
+        <mat-card appearance="outlined" class="panel trials">
+          <mat-card-header>
+            <mat-icon mat-card-avatar class="trial-icon">person_search</mat-icon>
+            <mat-card-title>{{ 'trials.mine' | translate }}</mat-card-title>
+            <mat-card-subtitle>{{ 'trials.mineHint' | translate }}</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <table class="data-table">
+              <tbody>
+                @for (tr of t.trials; track tr.leadId) {
+                  <tr>
+                    <td class="ltr nowrap">{{ tr.startsAtUtc | utcDate: 'EEE d MMM, HH:mm' }}</td>
+                    <td><b>{{ tr.leadName }}</b><div class="muted">{{ tr.courseName ?? '—' }}</div></td>
+                    <td><input class="cell" [(ngModel)]="trialNotes[tr.leadId]" [placeholder]="'trials.assessment' | translate" /></td>
+                    <td class="actions">
+                      <button mat-button (click)="actions.openMyRoom()"><mat-icon>videocam</mat-icon>{{ 'sessions.join' | translate }}</button>
+                      <button mat-stroked-button (click)="trialOutcome(tr, 'Attended')">{{ 'trials.status_Attended' | translate }}</button>
+                      <button mat-button (click)="trialOutcome(tr, 'NoShow')">{{ 'trials.status_NoShow' | translate }}</button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </mat-card-content>
+        </mat-card>
+      }
 
       <div class="grid">
         <mat-card appearance="outlined">
@@ -147,18 +181,40 @@ export class StudentCard {
     .person:hover { border-color: var(--mat-sys-primary); transform: translateY(-1px); }
     .avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #fff; font-size: 0.7rem; font-weight: 700; background: var(--app-gradient); }
     .block-title { margin: 8px 0 16px; font-size: 1.2rem; }
+    .trials { margin-bottom: 24px; }
+    .trial-icon { display: grid; place-items: center; border-radius: 12px; color: var(--mat-sys-primary);
+      background: color-mix(in srgb, var(--mat-sys-primary) 12%, transparent); }
+    .cell { padding: 6px; border: 1px solid var(--mat-sys-outline-variant); border-radius: 6px; background: transparent; color: inherit; width: 220px; }
+    .nowrap { white-space: nowrap; }
   `,
 })
 export class TeacherHomePage implements OnInit {
   private readonly api = inject(ApiService);
+  private readonly notify = inject(Notifier);
   protected readonly actions = inject(SessionActions);
   protected readonly auth = inject(AuthService);
   protected readonly overview = signal<MyOverviewDto | null>(null);
   protected readonly earnings = signal<MyEarningsDto | null>(null);
+  protected trialNotes: Record<number, string> = {};
 
   ngOnInit(): void {
-    this.api.get<MyOverviewDto>(`${Api.academic}/me/overview`).subscribe((o) => this.overview.set(o));
+    this.load();
     this.api.get<MyEarningsDto>(`${Api.finance}/me/earnings`).subscribe({ next: (e) => this.earnings.set(e), error: () => this.earnings.set(null) });
+  }
+
+  /** The teacher records how a trial went; sales then follows up with the family. */
+  protected trialOutcome(t: TrialDto, status: TrialStatus): void {
+    this.api.put(`${Api.academic}/leads/${t.leadId}/trial/outcome`, { status, notes: this.trialNotes[t.leadId] || null }).subscribe({
+      next: () => {
+        this.notify.saved();
+        this.load();
+      },
+      error: (e) => this.notify.error(e),
+    });
+  }
+
+  private load(): void {
+    this.api.get<MyOverviewDto>(`${Api.academic}/me/overview`).subscribe((o) => this.overview.set(o));
   }
 
   protected initials(name: string): string {
@@ -240,21 +296,27 @@ export class SupervisorHomePage implements OnInit {
 /** Student: this week's (or month's) sessions with excuses, my package or bill, feedback, points and badges (US-028, US-042). */
 @Component({
   selector: 'app-student-home',
-  imports: [PAGE_IMPORTS, MySessions, BillingCard],
+  imports: [PAGE_IMPORTS, MySessions, BillingCard, LearningCard],
   template: `
     <div class="page-header"><h1>{{ 'home.welcome' | translate: { name: auth.user()?.fullName } }}</h1></div>
+    @if (autoPayResult(); as r) {
+      <p class="status" [class.ok]="r === 'success'" [class.bad]="r !== 'success'">{{ 'autopay.result_' + r | translate }}</p>
+    }
 
     <app-my-sessions [showStudent]="false" [canExcuse]="true" (changed)="billing.reload()" />
 
     <div class="grid" style="margin-top: 24px">
-      <app-billing-card #billing [studentUserId]="auth.user()?.id ?? 0" />
+      <app-learning-card [studentUserId]="auth.user()?.id ?? 0" />
+      <app-billing-card #billing [studentUserId]="auth.user()?.id ?? 0" [payerUserId]="me()?.effectivePayerUserId ?? null" />
       @if (overview()?.student; as s) {
         <mat-card appearance="outlined">
           <mat-card-header><mat-card-title>{{ 'student.feedback' | translate }}</mat-card-title></mat-card-header>
           <mat-card-content>
             @for (f of s.recentFeedback; track f.id) {
               <div class="feedback">
-                <div><b>{{ f.sessionTitle }}</b> <span class="stars">{{ stars(f.rating) }}</span></div>
+                <div><b>{{ f.courseName ?? f.sessionTitle }}</b> <span class="stars">{{ stars(f.rating) }}</span></div>
+                @if (f.log?.accomplished) { <p>{{ f.log?.accomplished }}</p> }
+                @if (f.log?.homework) { <p class="muted">{{ 'log.homework' | translate }}: {{ f.log?.homework }}</p> }
                 @if (f.comment) { <p>{{ f.comment }}</p> }
                 <small class="muted">{{ f.teacherName }} · {{ f.sessionStartsAtUtc | utcDate: 'd MMM' }}</small>
               </div>
@@ -303,15 +365,19 @@ export class StudentHomePage implements OnInit {
   private readonly api = inject(ApiService);
   protected readonly auth = inject(AuthService);
   protected readonly overview = signal<MyOverviewDto | null>(null);
+  protected readonly me = signal<StudentDto | null>(null);
   protected readonly points = signal<StudentPointsDto | null>(null);
   protected readonly leaderboard = signal<LeaderboardEntry[]>([]);
+  /** success | failed | cancelled, set when the payer comes back from saving a card. */
+  protected readonly autoPayResult = signal(inject(ActivatedRoute).snapshot.queryParamMap.get('autopay'));
 
-  protected stars(n: number): string {
-    return '★'.repeat(n) + '☆'.repeat(5 - n);
+  protected stars(n: number | null): string {
+    return n ? '★'.repeat(n) + '☆'.repeat(5 - n) : '';
   }
 
   ngOnInit(): void {
     this.api.get<MyOverviewDto>(`${Api.academic}/me/overview`).subscribe((o) => this.overview.set(o));
+    this.api.get<StudentDto>(`${Api.academic}/students/${this.auth.user()?.id}`).subscribe({ next: (s) => this.me.set(s), error: () => this.me.set(null) });
     this.api.get<StudentPointsDto>(`${Api.academic}/students/${this.auth.user()?.id}/points`).subscribe((p) => this.points.set(p));
     this.api.get<LeaderboardEntry[]>(`${Api.academic}/leaderboard`, { top: 10 }).subscribe((l) => this.leaderboard.set(l));
   }
@@ -320,11 +386,14 @@ export class StudentHomePage implements OnInit {
 /** Parent portal: each child's attendance, feedback, sessions and monthly payments, with online pay (US-039, US-040). */
 @Component({
   selector: 'app-parent-home',
-  imports: [PAGE_IMPORTS, StudentCard, MySessions],
+  imports: [PAGE_IMPORTS, StudentCard, MySessions, BillingCard, LearningCard],
   template: `
     <div class="page-header"><h1>{{ 'nav.parentPortal' | translate }}</h1></div>
     @if (paymentResult(); as r) {
       <p class="status" [class.ok]="r === 'success'" [class.warn]="r === 'pending'" [class.bad]="r === 'failed' || r === 'cancelled'">{{ 'parent.payment_' + r | translate }}</p>
+    }
+    @if (autoPayResult(); as r) {
+      <p class="status" [class.ok]="r === 'success'" [class.bad]="r !== 'success'">{{ 'autopay.result_' + r | translate }}</p>
     }
     <app-my-sessions [canExcuse]="true" breakdown="student" />
     <div style="height: 24px"></div>
@@ -333,6 +402,10 @@ export class StudentHomePage implements OnInit {
         <mat-card-header><mat-card-title>{{ child.fullName }}</mat-card-title><mat-card-subtitle>{{ child.level }}</mat-card-subtitle></mat-card-header>
         <mat-card-content>
           <app-student-card [student]="child" />
+          <div class="grid child-cards">
+            <app-learning-card [studentUserId]="child.userId" />
+            <app-billing-card [studentUserId]="child.userId" [payerUserId]="payerOf(child.userId)" />
+          </div>
           <h3 class="section-title">{{ 'parent.payments' | translate }}</h3>
           @if (payments()[child.userId]; as p) {
             <p class="muted">{{ 'payments.paid' | translate }}: {{ p.totalPaid | number: '1.0-2' }} {{ p.currency }} · {{ 'finance.outstanding' | translate }}: {{ p.outstanding | number: '1.0-2' }} {{ p.currency }}</p>
@@ -362,16 +435,25 @@ export class StudentHomePage implements OnInit {
       <p class="empty">{{ 'parent.noChildren' | translate }}</p>
     }
   `,
+  styles: `.child-cards { margin: 16px 0; }`,
 })
 export class ParentHomePage implements OnInit {
   private readonly api = inject(ApiService);
   private readonly notify = inject(Notifier);
   protected readonly overview = signal<MyOverviewDto | null>(null);
   protected readonly payments = signal<Record<number, StudentPaymentsDto>>({});
+  /** Who pays for each child (the guardian, this parent, or someone else). */
+  protected readonly payers = signal<Record<number, number>>({});
+
+  protected payerOf(studentUserId: number): number | null {
+    return this.payers()[studentUserId] ?? null;
+  }
   private readonly translate = inject(TranslateService);
 
-  /** success | pending | failed | cancelled, set by the PayPal return redirect. */
+  /** success | pending | failed | cancelled, set by the payment provider's return redirect. */
   protected readonly paymentResult = signal(inject(ActivatedRoute).snapshot.queryParamMap.get('payment'));
+  /** success | failed | cancelled, set when the payer comes back from saving a card. */
+  protected readonly autoPayResult = signal(inject(ActivatedRoute).snapshot.queryParamMap.get('autopay'));
   protected readonly redirecting = signal(false);
 
   ngOnInit(): void {
@@ -381,6 +463,9 @@ export class ParentHomePage implements OnInit {
         this.api.get<StudentPaymentsDto>(`${Api.finance}/students/${child.userId}/payments`).subscribe((p) =>
           this.payments.update((all) => ({ ...all, [child.userId]: p })),
         );
+        this.api.get<StudentDto>(`${Api.academic}/students/${child.userId}`).subscribe((s) =>
+          this.payers.update((all) => ({ ...all, [child.userId]: s.effectivePayerUserId })),
+        );
       }
     });
   }
@@ -389,7 +474,7 @@ export class ParentHomePage implements OnInit {
     this.redirecting.set(true);
     this.api.post<CheckoutDto>(`${Api.finance}/student-payments/${studentPaymentId}/checkout`).subscribe({
       next: (c) => {
-        // PayPal can't charge EGP, so an EGP month is charged in USD. Show the payer both amounts first.
+        // PayPal can't charge EGP or SAR, so such a month is charged in USD. Show the payer both amounts first.
         const converted = c.chargedCurrency !== c.currency;
         if (converted && !confirm(this.translate.instant('parent.chargeConfirm', {
           amount: c.amount.toFixed(2), currency: c.currency, charged: c.chargedAmount.toFixed(2), chargedCurrency: c.chargedCurrency,
@@ -498,7 +583,8 @@ export class NotificationsPage implements OnInit {
   protected icon(type: string): string {
     return (
       { session_reminder: 'event', absence: 'event_busy', late: 'schedule', payment_due: 'payments', payment_overdue: 'warning',
-        payment_received: 'paid', payment_refunded: 'undo', salary_paid: 'account_balance_wallet' }[type] ?? 'notifications'
+        payment_received: 'paid', payment_refunded: 'undo', salary_paid: 'account_balance_wallet', session_report: 'summarize',
+        autopay_failed: 'credit_card_off' }[type] ?? 'notifications'
     );
   }
 

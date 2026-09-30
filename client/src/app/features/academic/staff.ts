@@ -1,7 +1,7 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { PagedResult } from '../../core/api/api.models';
 import { Api, ApiService } from '../../core/api/api.service';
-import { ParentDto, PersonRef, StaffProfileDto, StudentDto, WorkDayDto } from '../../core/api/models';
+import { CourseDto, ParentDto, PersonRef, StaffProfileDto, StudentDto, WorkDayDto } from '../../core/api/models';
 import { AuthService } from '../../core/auth/auth.service';
 import { Permissions } from '../../core/auth/permissions';
 import { Notifier } from '../../shared/notifier';
@@ -21,11 +21,12 @@ import { SessionActions } from '../../shared/sessions-kit';
       <mat-tab [label]="'staff.teachers' | translate">
         <div class="table-wrap tab-body">
           <table class="data-table">
-            <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'staff.specialization' | translate }}</th><th>{{ 'staff.students' | translate }}</th><th></th></tr></thead>
+            <thead><tr><th>{{ 'common.fullName' | translate }}</th><th>{{ 'staff.subjects' | translate }}</th><th>{{ 'staff.specialization' | translate }}</th><th>{{ 'staff.students' | translate }}</th><th></th></tr></thead>
             <tbody>
               @for (t of teachers(); track t.userId) {
                 <tr [class.selected]="teacher()?.userId === t.userId">
                   <td>{{ t.fullName }}</td>
+                  <td>{{ subjectNames(t) || ('staff.anySubject' | translate) }}</td>
                   <td>{{ t.specialization ?? '—' }}</td>
                   <td class="num">{{ t.linkedCount }}</td>
                   <td class="actions">
@@ -33,7 +34,7 @@ import { SessionActions } from '../../shared/sessions-kit';
                     @if (canManage) { <button mat-button (click)="openTeacher(t)">{{ 'common.edit' | translate }}</button> }
                   </td>
                 </tr>
-              } @empty { <tr><td colspan="4" class="empty">{{ 'common.noData' | translate }}</td></tr> }
+              } @empty { <tr><td colspan="5" class="empty">{{ 'common.noData' | translate }}</td></tr> }
             </tbody>
           </table>
         </div>
@@ -42,6 +43,13 @@ import { SessionActions } from '../../shared/sessions-kit';
             <mat-card-header><mat-card-title>{{ t.fullName }}</mat-card-title></mat-card-header>
             <mat-card-content>
               <div class="form-grid">
+                <mat-form-field>
+                  <mat-label>{{ 'staff.subjects' | translate }}</mat-label>
+                  <mat-select [(ngModel)]="selectedCourses" multiple>
+                    @for (c of courses(); track c.id) { <mat-option [value]="c.id">{{ c.name }}</mat-option> }
+                  </mat-select>
+                  <mat-hint>{{ 'staff.subjectsHint' | translate }}</mat-hint>
+                </mat-form-field>
                 <mat-form-field><mat-label>{{ 'staff.specialization' | translate }}</mat-label><input matInput [(ngModel)]="t.specialization" /></mat-form-field>
                 <mat-form-field><mat-label>{{ 'staff.bio' | translate }}</mat-label><input matInput [(ngModel)]="t.notes" /></mat-form-field>
                 <mat-form-field>
@@ -142,10 +150,17 @@ export class StaffPage implements OnInit {
   protected readonly supervisor = signal<StaffProfileDto | null>(null);
   protected readonly schedule = signal<WorkDayDto[]>([]);
   protected selectedStudents: number[] = [];
+  protected selectedCourses: number[] = [];
+  protected readonly courses = signal<CourseDto[]>([]);
   protected selectedTeachers: number[] = [];
 
   ngOnInit(): void {
     this.load();
+    this.api.get<CourseDto[]>(`${Api.academic}/courses`).subscribe((c) => this.courses.set(c));
+  }
+
+  protected subjectNames(t: StaffProfileDto): string {
+    return (t.courseIds ?? []).map((id) => this.courses().find((c) => c.id === id)?.name).filter(Boolean).join('، ');
   }
 
   protected childNames(p: ParentDto): string {
@@ -154,6 +169,7 @@ export class StaffPage implements OnInit {
 
   protected openTeacher(t: StaffProfileDto): void {
     this.teacher.set({ ...t });
+    this.selectedCourses = [...(t.courseIds ?? [])];
     this.api.get<PersonRef[]>(`${Api.academic}/teachers/${t.userId}/students`).subscribe((s) => (this.selectedStudents = s.map((x) => x.userId)));
   }
 
@@ -161,7 +177,11 @@ export class StaffPage implements OnInit {
     this.api.put(`${Api.academic}/teachers/${t.userId}`, { specialization: t.specialization || null, bio: t.notes || null }).subscribe({
       next: () =>
         this.api.put(`${Api.academic}/teachers/${t.userId}/students`, { userIds: this.selectedStudents }).subscribe({
-          next: () => this.done(() => this.teacher.set(null)),
+          next: () =>
+            this.api.put(`${Api.academic}/teachers/${t.userId}/courses`, { courseIds: this.selectedCourses }).subscribe({
+              next: () => this.done(() => this.teacher.set(null)),
+              error: (e) => this.notify.error(e),
+            }),
           error: (e) => this.notify.error(e),
         }),
       error: (e) => this.notify.error(e),

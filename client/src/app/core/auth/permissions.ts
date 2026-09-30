@@ -10,6 +10,7 @@ export const Roles = {
   Parent: 'Parent',
   Accountant: 'Accountant',
   Staff: 'Staff',
+  Sales: 'Sales',
 } as const;
 
 export type Role = (typeof Roles)[keyof typeof Roles];
@@ -29,4 +30,5 @@ export const Permissions = {
   reports: { view: 'reports.view' },
   dashboards: { view: 'dashboards.view' },
   auditLogs: { view: 'auditlogs.view' },
+  leads: { view: 'leads.view', manage: 'leads.manage' },
 } as const;

@@ -12,7 +12,10 @@ public sealed record AttendanceSummaryDto(int Present, int Late, int Absent)
     public double Rate => Total == 0 ? 0 : Math.Round((Present + Late) * 100.0 / Total, 1);
 }
 
-public sealed record TeacherOverviewDto(IReadOnlyList<PersonRefDto> Students, IReadOnlyList<SessionDto> Upcoming, int PendingToComplete, int CompletedThisMonth);
+/// <summary><see cref="Trials"/>: the teacher's upcoming and not-yet-assessed trial sessions with prospective students.</summary>
+public sealed record TeacherOverviewDto(
+    IReadOnlyList<PersonRefDto> Students, IReadOnlyList<SessionDto> Upcoming, int PendingToComplete, int CompletedThisMonth,
+    IReadOnlyList<TrialDto>? Trials = null);
 
 public sealed record SupervisedTeacherDto(long UserId, string FullName, int Students, int CompletedThisMonth);
 
@@ -31,7 +34,7 @@ public sealed record TeacherSessionCountDto(long TeacherUserId, int CompletedSes
 public sealed record MonthlyAcademicDto(string Month, int SessionsCompleted, double AttendanceRate);
 
 public sealed record AcademicStatsDto(
-    int ActiveStudents, int Teachers, int Groups, int SessionsScheduled, int SessionsCompleted, int SessionsCancelled,
+    int ActiveStudents, int Teachers, int SessionsScheduled, int SessionsCompleted, int SessionsCancelled,
     double AttendanceRate, IReadOnlyList<MonthlyAcademicDto> Monthly, IReadOnlyList<TeacherSessionsDto> TopTeachers);
 
 public sealed record TeacherSessionsDto(long UserId, string FullName, int Sessions);
@@ -44,7 +47,7 @@ public interface IOverviewService
 }
 
 internal sealed class OverviewService(
-    IAcademicDbContext db, AccessGuard guard, ISessionService sessions, TimeProvider clock) : IOverviewService
+    IAcademicDbContext db, AccessGuard guard, ISessionService sessions, ILeadService leads, TimeProvider clock) : IOverviewService
 {
     public async Task<MyOverviewDto> MineAsync(CancellationToken ct = default)
     {
@@ -61,7 +64,8 @@ internal sealed class OverviewService(
             var pending = await db.Sessions.CountAsync(s => s.TeacherUserId == me && s.Status == SessionStatus.Scheduled && s.EndsAtUtc < now, ct);
             var completed = await db.Sessions.CountAsync(s => s.TeacherUserId == me && s.Status == SessionStatus.Completed && s.StartsAtUtc >= monthStart, ct);
             teacher = new TeacherOverviewDto(
-                names.Select(n => new PersonRefDto(n.Key, n.Value)).OrderBy(n => n.FullName).ToList(), upcoming, pending, completed);
+                names.Select(n => new PersonRefDto(n.Key, n.Value)).OrderBy(n => n.FullName).ToList(), upcoming, pending, completed,
+                await leads.MyTrialsAsync(ct));
         }
 
         SupervisorOverviewDto? supervisor = null;
@@ -160,7 +164,6 @@ internal sealed class OverviewService(
         return new AcademicStatsDto(
             activeStudents,
             teacherIds?.Count ?? await db.Teachers.CountAsync(ct),
-            await db.Groups.CountAsync(ct),
             statusCounts.GetValueOrDefault(SessionStatus.Scheduled),
             statusCounts.GetValueOrDefault(SessionStatus.Completed),
             statusCounts.GetValueOrDefault(SessionStatus.Cancelled),
@@ -251,12 +254,9 @@ internal sealed class SessionReminderService(IAcademicDbContext db, IEventPublis
 
         foreach (var session in due)
         {
-            var students = session.StudentUserId is { } only ? [only]
-                : session.GroupId is { } g ? await db.GroupStudents.Where(gs => gs.GroupId == g).Select(gs => gs.StudentUserId).ToListAsync(ct)
-                : [];
-            var parents = await db.Students.Where(s => students.Contains(s.UserId) && s.ParentUserId != null)
-                .Select(s => s.ParentUserId!.Value).ToListAsync(ct);
-            var recipients = students.Concat(parents).Append(session.TeacherUserId).Distinct().ToList();
+            var parent = await db.Students.Where(s => s.UserId == session.StudentUserId).Select(s => s.ParentUserId).FirstOrDefaultAsync(ct);
+            var recipients = new[] { session.StudentUserId, session.TeacherUserId }
+                .Concat(parent is { } p ? [p] : Array.Empty<long>()).Distinct().ToList();
 
             await events.PublishAsync(new SessionReminderDue(session.AcademyId, session.Id, session.Title, session.StartsAtUtc, recipients), ct);
             session.ReminderSentOnUtc = now;

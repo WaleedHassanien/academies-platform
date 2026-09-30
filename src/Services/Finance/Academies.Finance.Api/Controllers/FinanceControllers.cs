@@ -80,9 +80,144 @@ public sealed class PaymentsController(IPaymentService payments, IOnlinePaymentS
 [AllowAnonymous]
 [Route("payments")]
 public sealed class PaymentCallbacksController(
-    IOnlinePaymentService online, IPaymentGateway gateway, IOptions<PaymentOptions> options, ILogger<PaymentCallbacksController> logger)
+    IOnlinePaymentService online, IAutoPayService autoPay, IPaymentGateway gateway, IAutoPayGateway autoPayGateway, IOptions<PaymentOptions> options,
+    TimeProvider clock, ILogger<PaymentCallbacksController> logger)
     : ControllerBase
 {
+    /// <summary>Stripe Checkout sends the payer here (?session_id=…); Stripe has already taken the money.</summary>
+    [HttpGet("stripe/return")]
+    public async Task<IActionResult> StripeReturn([FromQuery(Name = "session_id")] string sessionId, CancellationToken ct)
+    {
+        if (gateway is not StripeGateway)
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var capture = await gateway.CaptureAsync(sessionId, ct);
+            await ApplyAsync(capture, ct);
+            return Back(capture.Outcome switch
+            {
+                CaptureOutcome.Completed => "success",
+                CaptureOutcome.Pending => "pending",
+                _ => "failed",
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Stripe return failed for session {SessionId}", sessionId);
+            return Back("failed");
+        }
+    }
+
+    [HttpGet("stripe/cancel")]
+    public IActionResult StripeCancel() => Back("cancelled");
+
+    /// <summary>The payer saved a card on Stripe (?session_id=…): activate automatic payments.</summary>
+    [HttpGet("stripe/setup-return")]
+    public async Task<IActionResult> StripeSetupReturn([FromQuery(Name = "session_id")] string sessionId, CancellationToken ct)
+    {
+        if (autoPayGateway is not StripeGateway)
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            var card = await autoPayGateway.CompleteCardSetupAsync(sessionId, ct);
+            if (card is null)
+            {
+                return BackAutoPay("failed");
+            }
+
+            await CompleteCardAsync(card.Reference, sessionId, ct);
+            return BackAutoPay("success");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Saving a card failed for Stripe session {SessionId}", sessionId);
+            return BackAutoPay("failed");
+        }
+    }
+
+    [HttpGet("stripe/setup-cancel")]
+    public IActionResult StripeSetupCancel() => BackAutoPay("cancelled");
+
+    /// <summary>
+    /// Backstop for payers who close the tab: checkout.session.completed (a payment or a saved card)
+    /// and the async payment outcomes. The Stripe-Signature header is verified first.
+    /// </summary>
+    [HttpPost("webhooks/stripe")]
+    public async Task<IActionResult> StripeWebhook(CancellationToken ct)
+    {
+        if (gateway is not StripeGateway && autoPayGateway is not StripeGateway)
+        {
+            return NotFound();
+        }
+
+        using var reader = new StreamReader(Request.Body);
+        var body = await reader.ReadToEndAsync(ct);
+        if (!StripeGateway.VerifySignature(Request.Headers["Stripe-Signature"].FirstOrDefault(), body, options.Value.Stripe.WebhookSecret, clock.GetUtcNow()))
+        {
+            logger.LogWarning("Rejected Stripe webhook with an invalid signature.");
+            return BadRequest(ApiResponse.Fail("Invalid signature."));
+        }
+
+        var json = System.Text.Json.Nodes.JsonNode.Parse(body)!;
+        var type = json["type"]?.GetValue<string>();
+        var session = json["data"]?["object"];
+        var reference = session?["client_reference_id"]?.GetValue<string>();
+        if (session is null || string.IsNullOrEmpty(reference))
+        {
+            return Ok();
+        }
+
+        switch (type)
+        {
+            case "checkout.session.completed" when session["mode"]?.GetValue<string>() == "setup":
+                await CompleteCardAsync(reference, session["id"]!.GetValue<string>(), ct);
+                break;
+            case "checkout.session.completed" or "checkout.session.async_payment_succeeded":
+                await ApplyAsync(new GatewayCapture(reference, StripeGateway.OutcomeOf(session)), ct);
+                break;
+            case "checkout.session.async_payment_failed":
+                await ApplyAsync(new GatewayCapture(reference, CaptureOutcome.Failed), ct);
+                break;
+        }
+
+        return Ok();
+    }
+
+    /// <summary>Development only (auto-pay provider Fake): saves a test card at once.</summary>
+    [HttpGet("fake-card/{reference}")]
+    public async Task<IActionResult> FakeCard(string reference, CancellationToken ct)
+    {
+        if (autoPayGateway is not FakeAutoPayGateway)
+        {
+            return NotFound();
+        }
+
+        await CompleteCardAsync(reference, reference, ct);
+        return BackAutoPay("success");
+    }
+
+    /// <summary>Our card reference is CARD-{academyId}-{studentId}-{random}; the academy scopes the write.</summary>
+    private async Task CompleteCardAsync(string reference, string providerSetupId, CancellationToken ct)
+    {
+        var parts = reference.Split('-');
+        if (parts.Length < 4 || parts[0] != "CARD" || !long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var academyId))
+        {
+            throw new NotFoundException("Card setup", reference);
+        }
+
+        using var _ = CurrentUserOverride.Begin(SystemCurrentUser.ForAcademy(academyId));
+        await autoPay.CompleteSetupAsync(reference, providerSetupId, ct);
+    }
+
+    private RedirectResult BackAutoPay(string result) =>
+        Redirect($"{options.Value.AutoPay.ReturnUrl ?? options.Value.ReturnUrl}?autopay={result}");
+
     /// <summary>PayPal sends the payer here after approval (?token={orderId}); we capture and go back to the portal.</summary>
     [HttpGet("paypal/return")]
     public async Task<IActionResult> PayPalReturn([FromQuery] string token, CancellationToken ct)
@@ -187,7 +322,7 @@ public sealed class PaymentCallbacksController(
     private RedirectResult Back(string result) => Redirect($"{options.Value.ReturnUrl}?payment={result}");
 }
 
-/// <summary>The academy's billing currency (USD or EGP).</summary>
+/// <summary>The academy's base currency and exchange rates for report totals.</summary>
 [ApiController]
 [Authorize]
 [Route("settings")]
@@ -269,23 +404,77 @@ public sealed class SalariesController(ICompensationService compensations, ISala
 /// <summary>Per-session billing: student prices, teacher rates, invoices and the month-end close.</summary>
 [ApiController]
 [Authorize]
-public sealed class BillingController(IBillingSetupService setup, IStudentInvoiceService invoices, IMonthCloseService close) : ControllerBase
+public sealed class BillingController(
+    IBillingSetupService setup, IStudentInvoiceService invoices, IMonthCloseService close, IPackageService packages, IAutoPayService autoPay)
+    : ControllerBase
 {
+    /// <summary>The student's billings: one per subject (or one for all subjects).</summary>
     [HttpGet("students/{userId:long}/billing")]
     [HasPermission(Permissions.Payments.View)]
-    public async Task<ActionResult<ApiResponse<StudentBillingDto?>>> Get(long userId, CancellationToken ct) =>
-        Ok(ApiResponse<StudentBillingDto?>.Ok(await setup.GetStudentAsync(userId, ct)));
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<StudentBillingDto>>>> Get(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<StudentBillingDto>>.Ok(await setup.ListStudentAsync(userId, ct)));
 
+    /// <summary>Creates or updates the billing of the subject in the body (no subject: all subjects).</summary>
     [HttpPut("students/{userId:long}/billing")]
     [HasPermission(Permissions.Payments.Manage)]
     public async Task<ActionResult<ApiResponse<StudentBillingDto>>> Save(long userId, SaveStudentBillingRequest request, CancellationToken ct) =>
         Ok(ApiResponse<StudentBillingDto>.Ok(await setup.SaveStudentAsync(userId, request, ct)));
 
-    /// <summary>This month: sessions that counted, package left (prepaid) or amount so far (postpaid), balance due.</summary>
+    [HttpDelete("billings/{id:long}")]
+    [HasPermission(Permissions.Payments.Manage)]
+    public async Task<ActionResult<ApiResponse>> Stop(long id, CancellationToken ct)
+    {
+        await setup.StopAsync(id, ct);
+        return Ok(ApiResponse.Ok("Billing stopped."));
+    }
+
+    /// <summary>This month, per billing: sessions that counted, package left (prepaid) or amount so far (postpaid), balance due.</summary>
     [HttpGet("students/{userId:long}/billing/summary")]
     [HasPermission(Permissions.Payments.View)]
-    public async Task<ActionResult<ApiResponse<BillingSummaryDto?>>> Summary(long userId, CancellationToken ct) =>
-        Ok(ApiResponse<BillingSummaryDto?>.Ok(await setup.SummaryAsync(userId, ct)));
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<BillingSummaryDto>>>> Summary(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<BillingSummaryDto>>.Ok(await setup.SummaryAsync(userId, ct)));
+
+    [HttpGet("packages")]
+    [HasPermission(Permissions.Payments.View)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<PackageDto>>>> Packages([FromQuery] bool includeInactive, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<PackageDto>>.Ok(await packages.ListAsync(includeInactive, ct)));
+
+    [HttpPost("packages")]
+    [HasPermission(Permissions.Payments.Manage)]
+    public async Task<ActionResult<ApiResponse<PackageDto>>> CreatePackage(SavePackageRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<PackageDto>.Ok(await packages.CreateAsync(request, ct)));
+
+    [HttpPut("packages/{id:long}")]
+    [HasPermission(Permissions.Payments.Manage)]
+    public async Task<ActionResult<ApiResponse<PackageDto>>> UpdatePackage(long id, SavePackageRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<PackageDto>.Ok(await packages.UpdateAsync(id, request, ct)));
+
+    /// <summary>POST /packages/standard?currency=USD&amp;pricePerHour=12 — 8/12/16/20 sessions × 30/45/60 minutes.</summary>
+    [HttpPost("packages/standard")]
+    [HasPermission(Permissions.Payments.Manage)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<PackageDto>>>> StandardPackages(
+        [FromQuery] string currency, [FromQuery] decimal pricePerHour, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<PackageDto>>.Ok(await packages.CreateStandardAsync(currency, pricePerHour, ct)));
+
+    /// <summary>The saved card that renews the student's invoices automatically, if any.</summary>
+    [HttpGet("students/{userId:long}/autopay")]
+    [HasPermission(Permissions.Payments.View)]
+    public async Task<ActionResult<ApiResponse<AutoPayDto?>>> AutoPay(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<AutoPayDto?>.Ok(await autoPay.GetAsync(userId, ct)));
+
+    /// <summary>The payer saves a card on the provider's page (we never see the card number).</summary>
+    [HttpPost("students/{userId:long}/autopay/setup")]
+    [HasPermission(Permissions.Payments.View)]
+    public async Task<ActionResult<ApiResponse<AutoPaySetupDto>>> StartAutoPay(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<AutoPaySetupDto>.Ok(await autoPay.StartSetupAsync(userId, ct)));
+
+    [HttpDelete("students/{userId:long}/autopay")]
+    [HasPermission(Permissions.Payments.View)]
+    public async Task<ActionResult<ApiResponse>> StopAutoPay(long userId, CancellationToken ct)
+    {
+        await autoPay.CancelAsync(userId, ct);
+        return Ok(ApiResponse.Ok("Automatic payments stopped."));
+    }
 
     [HttpGet("teacher-rates")]
     [HasPermission(Permissions.Salaries.Manage)]

@@ -9,6 +9,7 @@ import { LanguageService } from '../../core/i18n/language.service';
 import { Notifier } from '../../shared/notifier';
 import { PAGE_IMPORTS } from '../../shared/page-imports';
 import { BillingCard } from '../../shared/billing-card';
+import { LearningCard } from '../../shared/learning-card';
 import { canBeExcused, OutcomeChip, SessionActions } from '../../shared/sessions-kit';
 import { TimeZoneField } from '../../shared/time-zone-field';
 import { ACADEMY_TIME_ZONE, dayKey, formatClock, formatDate, formatTime, parseUtc, utcOffset, zoneLabel } from '../../shared/time-zones';
@@ -23,10 +24,10 @@ interface SessionRow {
   studentDate: string | null;
 }
 
-/** One student: their teachers, time zone, and every session they belong to, in Egypt time and theirs. */
+/** One student: their subjects and plans, teachers, time zone, money, and every session, in Egypt time and theirs. */
 @Component({
   selector: 'app-student-detail',
-  imports: [PAGE_IMPORTS, NgTemplateOutlet, Stat, TimeZoneField, BillingCard, OutcomeChip],
+  imports: [PAGE_IMPORTS, NgTemplateOutlet, Stat, TimeZoneField, BillingCard, LearningCard, OutcomeChip],
   template: `
     <a mat-button routerLink="/students" class="back"><mat-icon class="flip">arrow_back</mat-icon>{{ 'nav.students' | translate }}</a>
 
@@ -39,8 +40,14 @@ interface SessionRow {
           <div class="facts">
             <span class="status" [class]="s.status">{{ 'status.' + s.status | translate }}</span>
             @if (s.level) { <span class="fact"><mat-icon>signal_cellular_alt</mat-icon>{{ s.level }}</span> }
-            @for (g of s.groups; track g) { <span class="fact"><mat-icon>groups</mat-icon>{{ g }}</span> }
-            @if (s.parentName) { <span class="fact"><mat-icon>family_restroom</mat-icon>{{ s.parentName }}</span> }
+            @for (g of s.subjects; track g) { <span class="fact"><mat-icon>menu_book</mat-icon>{{ g }}</span> }
+            @if (s.parentName) {
+              <span class="fact"><mat-icon>family_restroom</mat-icon>{{ s.parentName }}</span>
+            } @else {
+              <span class="fact"><mat-icon>person</mat-icon>{{ 'students.noGuardian' | translate }}</span>
+            }
+            <span class="fact"><mat-icon>payments</mat-icon>{{ 'students.payer' | translate }}:
+              {{ s.effectivePayerUserId === s.userId ? ('students.payerSelf' | translate) : (s.payerName ?? '—') }}</span>
             <span class="fact"><mat-icon>event</mat-icon>{{ 'students.enrolled' | translate }} {{ s.enrollmentDate | date: 'mediumDate' }}</span>
           </div>
         </div>
@@ -124,7 +131,8 @@ interface SessionRow {
           </mat-card-content>
         </mat-card>
 
-        <app-billing-card [studentUserId]="s.userId" [teachers]="s.teachers" />
+        <app-learning-card [studentUserId]="s.userId" />
+        <app-billing-card [studentUserId]="s.userId" [teachers]="s.teachers" [payerUserId]="s.effectivePayerUserId" />
       </div>
 
       <!-- Clicking a tile filters the table below. -->
@@ -187,12 +195,15 @@ interface SessionRow {
                   </td>
                   <td>
                     <a [routerLink]="['/sessions', r.item.session.id]" class="title">{{ r.item.session.title }}</a>
-                    <div class="muted">{{ r.item.session.courseName }}@if (r.item.session.groupName) { · {{ r.item.session.groupName }} }</div>
+                    <div class="muted">{{ r.item.session.courseName }}</div>
+                    @if (r.item.log?.accomplished) { <div class="muted small-log">{{ r.item.log?.accomplished }}</div> }
                   </td>
                   <td>{{ r.item.session.teacherName ?? '—' }}</td>
                   <td>
                     <app-outcome [session]="r.item.session" />
                     @if (r.item.rating) { <div class="stars" [matTooltip]="r.item.comment ?? ''">{{ stars(r.item.rating) }}</div> }
+                    @if (r.item.log?.memorization) { <div class="muted small-log">{{ 'log.memorization' | translate }}: {{ r.item.log?.memorization }}</div> }
+                    @if (r.item.log?.homework) { <div class="muted small-log">{{ 'log.homework' | translate }}: {{ r.item.log?.homework }}</div> }
                   </td>
                   <td class="actions">
                     @if (canBeExcused(r.item.session)) {
@@ -279,6 +290,7 @@ interface SessionRow {
     .nowrap { white-space: nowrap; }
     .title { font-weight: 600; text-decoration: none; }
     .stars { color: #f59e0b; letter-spacing: 1px; margin-top: 4px; cursor: default; }
+
 
     @media (max-width: 639px) {
       .profile { flex-direction: column; text-align: center; padding: 20px 16px; }

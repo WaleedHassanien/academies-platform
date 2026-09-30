@@ -147,8 +147,8 @@ public sealed class StudentViewsController(ISessionService sessions, IGamificati
 public sealed class LearningController(IAssignmentService assignments, ICertificateService certificates) : ControllerBase
 {
     [HttpGet("assignments")]
-    public async Task<ActionResult<ApiResponse<IReadOnlyList<AssignmentDto>>>> Assignments([FromQuery] long? courseId, [FromQuery] long? groupId, CancellationToken ct) =>
-        Ok(ApiResponse<IReadOnlyList<AssignmentDto>>.Ok(await assignments.ListAsync(courseId, groupId, ct)));
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<AssignmentDto>>>> Assignments([FromQuery] long? courseId, [FromQuery] long? studentUserId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<AssignmentDto>>.Ok(await assignments.ListAsync(courseId, studentUserId, ct)));
 
     [HttpPost("assignments")]
     public async Task<ActionResult<ApiResponse<AssignmentDto>>> CreateAssignment(SaveAssignmentRequest request, CancellationToken ct) =>

@@ -6,6 +6,7 @@ const ROLE_HOMES: ReadonlyArray<[role: string, path: string]> = [
   [Roles.Admin, '/admin'],
   [Roles.Manager, '/admin'],
   [Roles.Accountant, '/finance'],
+  [Roles.Sales, '/leads'],
   [Roles.Supervisor, '/supervisor'],
   [Roles.Teacher, '/teacher'],
   [Roles.Parent, '/parent'],

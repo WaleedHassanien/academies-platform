@@ -2,7 +2,7 @@ import { Routes } from '@angular/router';
 import { authGuard, guestGuard, permissionGuard, roleHomeRedirect } from './core/auth/auth.guards';
 import { Permissions } from './core/auth/permissions';
 
-const academic = () => import('./features/academic/groups-courses');
+const academic = () => import('./features/academic/courses');
 const sessions = () => import('./features/academic/sessions');
 const learning = () => import('./features/academic/learning');
 const payments = () => import('./features/finance/payments');
@@ -51,7 +51,6 @@ export const routes: Routes = [
       { path: 'students', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => import('./features/academic/students').then((m) => m.StudentsPage) },
       { path: 'students/:id', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => import('./features/academic/student-detail').then((m) => m.StudentDetailPage) },
       { path: 'staff', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => import('./features/academic/staff').then((m) => m.StaffPage) },
-      { path: 'groups', canActivate: [permissionGuard(Permissions.profiles.view)], loadComponent: () => academic().then((m) => m.GroupsPage) },
       { path: 'courses', canActivate: [permissionGuard(Permissions.courses.view)], loadComponent: () => academic().then((m) => m.CoursesPage) },
       { path: 'sessions', canActivate: [permissionGuard(Permissions.sessions.view)], loadComponent: () => sessions().then((m) => m.SessionsPage) },
       { path: 'sessions/:id', canActivate: [permissionGuard(Permissions.sessions.view)], loadComponent: () => sessions().then((m) => m.SessionDetailPage) },
@@ -59,12 +58,16 @@ export const routes: Routes = [
       { path: 'assignments', canActivate: [permissionGuard(Permissions.courses.view)], loadComponent: () => learning().then((m) => m.AssignmentsPage) },
       { path: 'certificates', canActivate: [permissionGuard(Permissions.courses.view)], loadComponent: () => learning().then((m) => m.CertificatesPage) },
 
+      // ---- Sales ----
+      { path: 'leads', canActivate: [permissionGuard(Permissions.leads.view)], loadComponent: () => import('./features/sales/leads').then((m) => m.LeadsPage) },
+
       // ---- Finance ----
       { path: 'payments', canActivate: [permissionGuard(Permissions.payments.manage)], loadComponent: () => payments().then((m) => m.PaymentsPage) },
       { path: 'payment-logs', canActivate: [permissionGuard(Permissions.payments.view)], loadComponent: () => payments().then((m) => m.PaymentLogsPage) },
       { path: 'pay', canActivate: [permissionGuard(Permissions.salaries.manage)], loadComponent: () => salaries().then((m) => m.CompensationPage) },
       { path: 'salaries', canActivate: [permissionGuard(Permissions.salaries.manage)], loadComponent: () => salaries().then((m) => m.SalariesPage) },
       { path: 'payouts', canActivate: [permissionGuard(Permissions.salaries.manage)], loadComponent: () => import('./features/finance/payouts').then((m) => m.PayoutsPage) },
+      { path: 'packages', canActivate: [permissionGuard(Permissions.payments.view)], loadComponent: () => import('./features/finance/packages').then((m) => m.PackagesPage) },
       { path: 'expenses', canActivate: [permissionGuard(Permissions.expenses.manage)], loadComponent: () => salaries().then((m) => m.ExpensesPage) },
       { path: 'reports', canActivate: [permissionGuard(Permissions.reports.view)], loadComponent: () => salaries().then((m) => m.ReportsPage) },
     ],

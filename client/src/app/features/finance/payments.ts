@@ -23,9 +23,31 @@ import { PAGE_IMPORTS } from '../../shared/page-imports';
             </mat-select>
             <mat-hint>{{ 'payments.currencyHint' | translate }}</mat-hint>
           </mat-form-field>
+          @if (canManage) { <button mat-stroked-button (click)="showRates.set(!showRates())"><mat-icon>currency_exchange</mat-icon>{{ 'payments.rates' | translate }}</button> }
         </div>
       }
     </div>
+
+    @if (showRates() && settings(); as s) {
+      <mat-card appearance="outlined" class="panel">
+        <mat-card-header>
+          <mat-card-title>{{ 'payments.rates' | translate }}</mat-card-title>
+          <mat-card-subtitle>{{ 'payments.ratesHint' | translate: { base: s.currency } }}</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="form-grid">
+            @for (c of otherCurrencies(); track c) {
+              <mat-form-field>
+                <mat-label class="ltr">1 {{ c }} =</mat-label>
+                <input matInput type="number" min="0" step="0.0001" [(ngModel)]="rates[c]" />
+                <span matTextSuffix>&nbsp;{{ s.currency }}</span>
+              </mat-form-field>
+            }
+          </div>
+          <div class="form-actions"><button mat-flat-button (click)="saveRates()">{{ 'common.save' | translate }}</button></div>
+        </mat-card-content>
+      </mat-card>
+    }
 
     <mat-card appearance="outlined" class="panel">
       <mat-card-header><mat-card-title>{{ 'payments.newPlan' | translate }}</mat-card-title></mat-card-header>
@@ -35,7 +57,11 @@ import { PAGE_IMPORTS } from '../../shared/page-imports';
             <mat-label>{{ 'roles.Student' | translate }}</mat-label>
             <mat-select [(ngModel)]="plan.studentUserId">@for (s of students(); track s.userId) { <mat-option [value]="s.userId">{{ s.fullName }}</mat-option> }</mat-select>
           </mat-form-field>
-          <mat-form-field><mat-label>{{ 'payments.monthlyAmount' | translate }}</mat-label><input matInput type="number" [(ngModel)]="plan.monthlyAmount" /><span matTextSuffix>&nbsp;{{ settings()?.currency }}</span></mat-form-field>
+          <mat-form-field><mat-label>{{ 'payments.monthlyAmount' | translate }}</mat-label><input matInput type="number" [(ngModel)]="plan.monthlyAmount" /></mat-form-field>
+          <mat-form-field>
+            <mat-label>{{ 'billing.currency' | translate }}</mat-label>
+            <mat-select [(ngModel)]="plan.currency">@for (c of settings()?.available ?? []; track c) { <mat-option [value]="c">{{ c }}</mat-option> }</mat-select>
+          </mat-form-field>
           <mat-form-field><mat-label>{{ 'payments.startDate' | translate }}</mat-label><input matInput type="date" [(ngModel)]="plan.startDate" /></mat-form-field>
           <mat-form-field><mat-label>{{ 'payments.months' | translate }}</mat-label><input matInput type="number" [(ngModel)]="plan.months" /></mat-form-field>
           <mat-form-field><mat-label>{{ 'payments.dueDay' | translate }}</mat-label><input matInput type="number" min="1" max="28" [(ngModel)]="plan.dueDay" /></mat-form-field>
@@ -121,7 +147,12 @@ export class PaymentsPage implements OnInit {
   protected readonly months = signal<StudentPaymentsDto | null>(null);
   protected readonly paying = signal<StudentPaymentDto | null>(null);
   protected readonly settings = signal<FinanceSettingsDto | null>(null);
-  protected plan = { studentUserId: null as number | null, monthlyAmount: 0, startDate: isoDate(new Date()), months: 12, dueDay: 1 };
+  protected plan = {
+    studentUserId: null as number | null, monthlyAmount: 0, startDate: isoDate(new Date()), months: 12, dueDay: 1, currency: null as string | null,
+  };
+  protected readonly showRates = signal(false);
+  protected rates: Record<string, number | null> = {};
+  protected readonly otherCurrencies = () => (this.settings()?.available ?? []).filter((c) => c !== this.settings()?.currency);
   protected payAmount = 0;
   protected payMethod = 'Cash';
   protected payReference = '';
@@ -129,14 +160,37 @@ export class PaymentsPage implements OnInit {
   ngOnInit(): void {
     this.load();
     this.api.get<PagedResult<StudentDto>>(`${Api.academic}/students`, { pageSize: 100 }).subscribe((r) => this.students.set(r.items));
-    this.api.get<FinanceSettingsDto>(`${Api.finance}/settings`).subscribe((s) => this.settings.set(s));
+    this.api.get<FinanceSettingsDto>(`${Api.finance}/settings`).subscribe((s) => this.applySettings(s));
+  }
+
+  private applySettings(s: FinanceSettingsDto): void {
+    this.settings.set(s);
+    this.rates = { ...s.exchangeRates };
+    this.plan.currency ??= s.currency;
+  }
+
+  /** Rates used to add payments in other currencies into the report totals. */
+  protected saveRates(): void {
+    const s = this.settings();
+    if (!s) {
+      return;
+    }
+    const exchangeRates = Object.fromEntries(Object.entries(this.rates).filter(([, v]) => v !== null && Number(v) > 0).map(([k, v]) => [k, Number(v)]));
+    this.api.put<FinanceSettingsDto>(`${Api.finance}/settings`, { currency: s.currency, exchangeRates }).subscribe({
+      next: (updated) => {
+        this.applySettings(updated);
+        this.showRates.set(false);
+        this.notify.saved();
+      },
+      error: (e) => this.notify.error(e),
+    });
   }
 
   /** New plans use the new currency; existing plans keep theirs. */
   protected saveCurrency(currency: string): void {
     this.api.put<FinanceSettingsDto>(`${Api.finance}/settings`, { currency }).subscribe({
       next: (s) => {
-        this.settings.set(s);
+        this.applySettings(s);
         this.notify.saved();
       },
       error: (e) => this.notify.error(e),

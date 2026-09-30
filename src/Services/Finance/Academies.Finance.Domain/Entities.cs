@@ -4,21 +4,65 @@ namespace Academies.Finance.Domain;
 
 // ---------- Currency ----------
 
-/// <summary>Currencies an academy can bill in.</summary>
+/// <summary>
+/// Currencies students can be billed in. Each student's billing has its own currency; the academy's
+/// base currency is used for salaries, payouts, expenses and the totals in reports.
+/// </summary>
 public static class Currencies
 {
     public const string USD = "USD";
+    public const string EUR = "EUR";
+    public const string GBP = "GBP";
+    public const string SAR = "SAR";
     public const string EGP = "EGP";
     public const string Default = EGP;
 
-    public static readonly IReadOnlyList<string> All = [USD, EGP];
+    public static readonly IReadOnlyList<string> All = [USD, EUR, GBP, SAR, EGP];
+
+    public static bool IsKnown(string? currency) => currency is not null && All.Contains(currency.ToUpperInvariant());
 }
 
-/// <summary>Per-academy finance settings: the billing currency for plans, payments, salaries and reports.</summary>
+/// <summary>
+/// Per-academy finance settings: the base currency (salaries, payouts, expenses, report totals) and
+/// the exchange rates used to add other currencies into report totals.
+/// </summary>
 public sealed class FinanceSettings : BaseEntity, ITenantEntity
 {
     public long AcademyId { get; set; }
     public string Currency { get; set; } = Currencies.Default;
+
+    /// <summary>"USD=48.5;SAR=12.9": how much one unit of each currency is worth in <see cref="Currency"/>.</summary>
+    public string? ExchangeRates { get; set; }
+
+    public IReadOnlyDictionary<string, decimal> Rates() =>
+        (ExchangeRates ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(pair => pair.Split('=', 2, StringSplitOptions.TrimEntries))
+        .Where(p => p.Length == 2 && decimal.TryParse(p[1], System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var r) && r > 0)
+        .ToDictionary(p => p[0].ToUpperInvariant(), p => decimal.Parse(p[1], System.Globalization.CultureInfo.InvariantCulture));
+
+    public static string FormatRates(IReadOnlyDictionary<string, decimal> rates) =>
+        string.Join(';', rates.Where(r => r.Value > 0).OrderBy(r => r.Key)
+            .Select(r => $"{r.Key.ToUpperInvariant()}={r.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"));
+}
+
+// ---------- Packages ----------
+
+/// <summary>
+/// A ready-made monthly package: sessions per month and session length at a monthly price, in one
+/// currency (e.g. 8 × 30 min for 60 USD). Picking a package sets a prepaid student's billing.
+/// </summary>
+public sealed class Package : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public required string Name { get; set; }
+    public int SessionsPerMonth { get; set; }
+    public int SessionMinutes { get; set; }
+    public string Currency { get; set; } = Currencies.Default;
+    public decimal MonthlyPrice { get; set; }
+    public bool IsActive { get; set; } = true;
+
+    public static readonly IReadOnlyList<int> StandardSessions = [8, 12, 16, 20];
+    public static readonly IReadOnlyList<int> StandardMinutes = [30, 45, 60];
 }
 
 // ---------- Pay settings (US-031) ----------
@@ -91,6 +135,15 @@ public sealed class StudentPayment : BaseEntity, ITenantEntity
     public long AcademyId { get; set; }
     public long PaymentPlanId { get; set; }
     public long StudentUserId { get; set; }
+
+    /// <summary>The subject this invoice is for, when billing is per subject.</summary>
+    public long? CourseId { get; set; }
+
+    /// <summary>Automatic card charges tried so far, and when the last one ran (see <see cref="AutoPayMandate"/>).</summary>
+    public int AutoChargeAttempts { get; set; }
+
+    public DateTime? LastAutoChargeOnUtc { get; set; }
+
     public int MonthNumber { get; set; }
     public DateOnly PeriodStart { get; set; }
     public DateOnly DueDate { get; set; }
@@ -155,6 +208,17 @@ public sealed class StudentGuardian : BaseEntity, ITenantEntity
     public long AcademyId { get; set; }
     public long StudentUserId { get; set; }
     public long ParentUserId { get; set; }
+}
+
+/// <summary>
+/// Student → who pays (the student or a parent account), copied from Academic's StudentPayerChanged
+/// events. Without a row the payer is the guardian, or else the student.
+/// </summary>
+public sealed class StudentPayer : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long StudentUserId { get; set; }
+    public long PayerUserId { get; set; }
 }
 
 // ---------- Salaries (US-032, US-033) ----------
@@ -236,15 +300,30 @@ public enum BillingMode
     Postpaid = 2,
 }
 
+/// <summary>
+/// How a student pays for one subject (<see cref="CourseId"/>), or for all their subjects when it is
+/// null. Each billing has its own currency and its own monthly invoices.
+/// </summary>
 public sealed class StudentBilling : BaseEntity, ITenantEntity
 {
     public long AcademyId { get; set; }
     public long StudentUserId { get; set; }
+    public long? CourseId { get; set; }
     public BillingMode Mode { get; set; } = BillingMode.Postpaid;
+
+    /// <summary>Postpaid: the price of each session. Prepaid: the monthly price divided by the sessions (used for deductions).</summary>
     public decimal PricePerSession { get; set; }
 
     /// <summary>Prepaid package size; ignored for postpaid.</summary>
     public int SessionsPerMonth { get; set; }
+
+    /// <summary>Prepaid: what a month costs (a package can be cheaper than sessions × price).</summary>
+    public decimal MonthlyPrice { get; set; }
+
+    /// <summary>The package this billing was set from, if any.</summary>
+    public long? PackageId { get; set; }
+
+    public int? SessionMinutes { get; set; }
 
     public string Currency { get; set; } = Currencies.Default;
 
@@ -381,6 +460,12 @@ public sealed class OnlinePayment : BaseEntity, ITenantEntity
     public long StudentPaymentId { get; set; }
     public required string Provider { get; set; }
 
+    /// <summary>Set when the charge was made automatically on a saved card.</summary>
+    public long? MandateId { get; set; }
+
+    public string? FailureReason { get; set; }
+
+
     /// <summary>Our reference, sent to the provider as custom_id and echoed back on capture and in webhooks.</summary>
     public required string Reference { get; set; }
 
@@ -397,4 +482,44 @@ public sealed class OnlinePayment : BaseEntity, ITenantEntity
     public string? CheckoutUrl { get; set; }
     public long? InitiatedByUserId { get; set; }
     public DateTime? CompletedOnUtc { get; set; }
+}
+
+// ---------- Automatic renewal on a saved card ----------
+
+public enum MandateStatus
+{
+    /// <summary>The payer was sent to the provider to save a card and hasn't finished yet.</summary>
+    Pending = 1,
+
+    Active = 2,
+    Cancelled = 3,
+}
+
+/// <summary>
+/// The payer's saved card for one student: each of the student's invoices is charged on it
+/// automatically when it falls due (a prepaid package renews itself every month).
+/// </summary>
+public sealed class AutoPayMandate : BaseEntity, ITenantEntity
+{
+    public long AcademyId { get; set; }
+    public long StudentUserId { get; set; }
+    public long PayerUserId { get; set; }
+    public required string Provider { get; set; }
+
+    /// <summary>Our reference for the card-saving checkout.</summary>
+    public required string Reference { get; set; }
+
+    /// <summary>The provider's id for that checkout (a Stripe Checkout Session).</summary>
+    public string? ProviderSetupId { get; set; }
+
+    public string? CustomerId { get; set; }
+    public string? PaymentMethodId { get; set; }
+    public string? CardBrand { get; set; }
+    public string? CardLast4 { get; set; }
+    public MandateStatus Status { get; set; } = MandateStatus.Pending;
+    public DateTime? ActivatedOnUtc { get; set; }
+    public string? LastError { get; set; }
+
+    /// <summary>At most this many automatic tries per invoice, a day apart.</summary>
+    public const int MaxAttempts = 3;
 }

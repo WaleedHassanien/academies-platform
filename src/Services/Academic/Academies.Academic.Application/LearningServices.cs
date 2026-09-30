@@ -103,15 +103,16 @@ internal sealed class GamificationService(
 
 // ---------- Assignments (US-036) ----------
 
+/// <summary><see cref="StudentUserId"/> null: for every student enrolled in the subject.</summary>
 public sealed record AssignmentDto(
-    long Id, long CourseId, string? CourseName, long? GroupId, string? GroupName, long TeacherUserId, string? TeacherName,
+    long Id, long CourseId, string? CourseName, long? StudentUserId, string? StudentName, long TeacherUserId, string? TeacherName,
     string Title, string? Description, DateTime DueAtUtc, decimal MaxScore, int SubmissionCount, SubmissionDto? MySubmission);
 
 public sealed record SubmissionDto(
     long Id, long AssignmentId, long StudentUserId, string? StudentName, string? Content, string? AttachmentUrl,
     DateTime SubmittedAtUtc, bool IsLate, decimal? Score, string? TeacherFeedback, DateTime? GradedAtUtc);
 
-public sealed record SaveAssignmentRequest(long CourseId, long? GroupId, long? TeacherUserId, string Title, string? Description, DateTime DueAtUtc, decimal MaxScore);
+public sealed record SaveAssignmentRequest(long CourseId, long? StudentUserId, long? TeacherUserId, string Title, string? Description, DateTime DueAtUtc, decimal MaxScore);
 
 public sealed record SubmitRequest(string? Content, string? AttachmentUrl);
 
@@ -119,7 +120,7 @@ public sealed record GradeRequest(decimal Score, string? Feedback);
 
 public interface IAssignmentService
 {
-    Task<IReadOnlyList<AssignmentDto>> ListAsync(long? courseId, long? groupId, CancellationToken ct = default);
+    Task<IReadOnlyList<AssignmentDto>> ListAsync(long? courseId, long? studentUserId, CancellationToken ct = default);
     Task<AssignmentDto> CreateAsync(SaveAssignmentRequest request, CancellationToken ct = default);
     Task<AssignmentDto> UpdateAsync(long id, SaveAssignmentRequest request, CancellationToken ct = default);
     Task DeleteAsync(long id, CancellationToken ct = default);
@@ -132,10 +133,10 @@ internal sealed class AssignmentService(
     IAcademicDbContext db, AccessGuard guard, IGamificationService gamification, TimeProvider clock) : IAssignmentService
 {
     /// <summary>
-    /// Students see assignments for their groups, plus course-wide ones for courses their groups
-    /// take. Teachers see their own. Staff see all.
+    /// Students see assignments set for them, plus subject-wide ones for subjects they are enrolled
+    /// in. Teachers see their own (and supervisors their teachers'). Staff see all.
     /// </summary>
-    public async Task<IReadOnlyList<AssignmentDto>> ListAsync(long? courseId, long? groupId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AssignmentDto>> ListAsync(long? courseId, long? studentUserId, CancellationToken ct = default)
     {
         var q = db.Assignments.AsNoTracking().AsQueryable();
         if (courseId is { } c)
@@ -143,21 +144,21 @@ internal sealed class AssignmentService(
             q = q.Where(a => a.CourseId == c);
         }
 
-        if (groupId is { } g)
+        if (studentUserId is { } sid)
         {
-            q = q.Where(a => a.GroupId == g);
+            q = q.Where(a => a.StudentUserId == sid || a.StudentUserId == null);
         }
 
         var isStudent = !guard.IsStaff && guard.IsInRole(Roles.Student);
         if (!guard.IsStaff)
         {
             var me = guard.Me;
-            var myGroups = await db.GroupStudents.Where(gs => gs.StudentUserId == me).Select(gs => gs.GroupId).ToListAsync(ct);
-            var myCourses = await db.Groups.Where(x => myGroups.Contains(x.Id) && x.CourseId != null).Select(x => x.CourseId!.Value).ToListAsync(ct);
+            var myCourses = await db.Enrollments.Where(e => e.StudentUserId == me && e.Status != EnrollmentStatus.Ended)
+                .Select(e => e.CourseId).ToListAsync(ct);
             var teachers = await guard.VisibleTeacherIdsAsync(ct) ?? [];
             q = q.Where(a => teachers.Contains(a.TeacherUserId)
-                             || (a.GroupId != null && myGroups.Contains(a.GroupId.Value))
-                             || (a.GroupId == null && myCourses.Contains(a.CourseId)));
+                             || a.StudentUserId == me
+                             || (a.StudentUserId == null && myCourses.Contains(a.CourseId)));
         }
 
         var list = await q.OrderByDescending(a => a.DueAtUtc).Take(500).ToListAsync(ct);
@@ -170,7 +171,7 @@ internal sealed class AssignmentService(
         await ValidateAsync(request, teacherId, ct);
         var assignment = new Assignment
         {
-            CourseId = request.CourseId, GroupId = request.GroupId, TeacherUserId = teacherId, Title = request.Title.Trim(),
+            CourseId = request.CourseId, StudentUserId = request.StudentUserId, TeacherUserId = teacherId, Title = request.Title.Trim(),
             Description = request.Description, DueAtUtc = request.DueAtUtc, MaxScore = request.MaxScore,
         };
         db.Assignments.Add(assignment);
@@ -184,7 +185,7 @@ internal sealed class AssignmentService(
         var teacherId = ResolveTeacher(request.TeacherUserId ?? assignment.TeacherUserId);
         await ValidateAsync(request, teacherId, ct);
         assignment.CourseId = request.CourseId;
-        assignment.GroupId = request.GroupId;
+        assignment.StudentUserId = request.StudentUserId;
         assignment.TeacherUserId = teacherId;
         assignment.Title = request.Title.Trim();
         assignment.Description = request.Description;
@@ -289,9 +290,9 @@ internal sealed class AssignmentService(
             throw new NotFoundException(nameof(Course), request.CourseId);
         }
 
-        if (request.GroupId is { } g && !await db.Groups.AnyAsync(x => x.Id == g, ct))
+        if (request.StudentUserId is { } student)
         {
-            throw new NotFoundException(nameof(Group), g);
+            await db.People.EnsureRoleAsync(student, Roles.Student, ct);
         }
 
         await db.People.EnsureRoleAsync(teacherId, Roles.Teacher, ct);
@@ -321,13 +322,12 @@ internal sealed class AssignmentService(
             ? await db.Submissions.Where(s => ids.Contains(s.AssignmentId) && s.StudentUserId == sid).ToDictionaryAsync(s => s.AssignmentId, ct)
             : [];
         var courseIds = list.Select(a => a.CourseId).Distinct().ToList();
-        var groupIds = list.Where(a => a.GroupId.HasValue).Select(a => a.GroupId!.Value).Distinct().ToList();
         var courses = await db.Courses.Where(c => courseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
-        var groups = await db.Groups.Where(g => groupIds.Contains(g.Id)).ToDictionaryAsync(g => g.Id, g => g.Name, ct);
-        var names = await db.People.NamesAsync(list.Select(a => a.TeacherUserId), ct);
+        var names = await db.People.NamesAsync(
+            list.Select(a => a.TeacherUserId).Concat(list.Where(a => a.StudentUserId.HasValue).Select(a => a.StudentUserId!.Value)), ct);
 
         return list.Select(a => new AssignmentDto(
-            a.Id, a.CourseId, courses.GetValueOrDefault(a.CourseId), a.GroupId, a.GroupId is { } g ? groups.GetValueOrDefault(g) : null,
+            a.Id, a.CourseId, courses.GetValueOrDefault(a.CourseId), a.StudentUserId, a.StudentUserId is { } forStudent ? names.GetValueOrDefault(forStudent) : null,
             a.TeacherUserId, names.GetValueOrDefault(a.TeacherUserId), a.Title, a.Description, a.DueAtUtc, a.MaxScore,
             counts.GetValueOrDefault(a.Id), mine.TryGetValue(a.Id, out var s) ? ToDto(s, a, null) : null)).ToList();
     }

@@ -33,6 +33,12 @@ public sealed class ProfilesController(IProfileService profiles, IWorkScheduleSe
     public async Task<ActionResult<ApiResponse<StudentDto>>> SetParent(long userId, SetParentRequest request, CancellationToken ct) =>
         Ok(ApiResponse<StudentDto>.Ok(await profiles.SetParentAsync(userId, request.ParentUserId, ct)));
 
+    /// <summary>Who pays and receives invoices: the student, a parent account, or (null) the default.</summary>
+    [HttpPut("students/{userId:long}/payer")]
+    [HasPermission(Permissions.Profiles.Manage)]
+    public async Task<ActionResult<ApiResponse<StudentDto>>> SetPayer(long userId, SetPayerRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<StudentDto>.Ok(await profiles.SetPayerAsync(userId, request.PayerUserId, ct)));
+
     [HttpGet("teachers")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<StaffProfileDto>>>> Teachers(CancellationToken ct) =>
         Ok(ApiResponse<IReadOnlyList<StaffProfileDto>>.Ok(await profiles.ListTeachersAsync(ct)));
@@ -82,7 +88,7 @@ public sealed class ProfilesController(IProfileService profiles, IWorkScheduleSe
         Ok(ApiResponse<IReadOnlyList<WorkDayDto>>.Ok(await schedules.GetAsync(currentUser.UserId ?? throw new UnauthorizedException(), ct)));
 }
 
-/// <summary>Supervisor↔teacher (US-022), teacher↔student and groups (US-023).</summary>
+/// <summary>Supervisor↔teacher (US-022), teacher↔student (US-023) and teachers' subjects.</summary>
 [ApiController]
 [Authorize]
 public sealed class RelationshipsController(IRelationshipService relationships) : ControllerBase
@@ -105,36 +111,130 @@ public sealed class RelationshipsController(IRelationshipService relationships) 
     public async Task<ActionResult<ApiResponse<IReadOnlyList<PersonRefDto>>>> SetTeacherStudents(long userId, SetMembersRequest request, CancellationToken ct) =>
         Ok(ApiResponse<IReadOnlyList<PersonRefDto>>.Ok(await relationships.SetTeacherStudentsAsync(userId, request.UserIds, ct)));
 
-    [HttpGet("groups")]
-    public async Task<ActionResult<ApiResponse<IReadOnlyList<GroupDto>>>> Groups(CancellationToken ct) =>
-        Ok(ApiResponse<IReadOnlyList<GroupDto>>.Ok(await relationships.ListGroupsAsync(ct)));
+    /// <summary>The subjects a teacher may teach (empty: any).</summary>
+    [HttpGet("teachers/{userId:long}/courses")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<long>>>> TeacherCourses(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<long>>.Ok(await relationships.TeacherCoursesAsync(userId, ct)));
 
-    [HttpGet("groups/{id:long}")]
-    public async Task<ActionResult<ApiResponse<GroupDto>>> Group(long id, CancellationToken ct) =>
-        Ok(ApiResponse<GroupDto>.Ok(await relationships.GetGroupAsync(id, ct)));
-
-    [HttpPost("groups")]
+    [HttpPut("teachers/{userId:long}/courses")]
     [HasPermission(Permissions.Profiles.Manage)]
-    public async Task<ActionResult<ApiResponse<GroupDto>>> CreateGroup(SaveGroupRequest request, CancellationToken ct) =>
-        Ok(ApiResponse<GroupDto>.Ok(await relationships.CreateGroupAsync(request, ct)));
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<long>>>> SetTeacherCourses(long userId, SetTeacherCoursesRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<long>>.Ok(await relationships.SetTeacherCoursesAsync(userId, request.CourseIds, ct)));
+}
 
-    [HttpPut("groups/{id:long}")]
-    [HasPermission(Permissions.Profiles.Manage)]
-    public async Task<ActionResult<ApiResponse<GroupDto>>> UpdateGroup(long id, SaveGroupRequest request, CancellationToken ct) =>
-        Ok(ApiResponse<GroupDto>.Ok(await relationships.UpdateGroupAsync(id, request, ct)));
+/// <summary>A student's subjects (enrollments) and the teacher's plan for each subject.</summary>
+[ApiController]
+[Authorize]
+public sealed class StudentLearningController(IEnrollmentService enrollments, ILearningPlanService plans) : ControllerBase
+{
+    [HttpGet("students/{userId:long}/enrollments")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<EnrollmentDto>>>> Enrollments(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<EnrollmentDto>>.Ok(await enrollments.ListAsync(userId, ct)));
 
-    [HttpDelete("groups/{id:long}")]
+    [HttpPost("students/{userId:long}/enrollments")]
     [HasPermission(Permissions.Profiles.Manage)]
-    public async Task<ActionResult<ApiResponse>> DeleteGroup(long id, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<EnrollmentDto>>> Enroll(long userId, SaveEnrollmentRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<EnrollmentDto>.Ok(await enrollments.AddAsync(userId, request, ct)));
+
+    [HttpPut("enrollments/{id:long}")]
+    [HasPermission(Permissions.Profiles.Manage)]
+    public async Task<ActionResult<ApiResponse<EnrollmentDto>>> UpdateEnrollment(long id, SaveEnrollmentRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<EnrollmentDto>.Ok(await enrollments.UpdateAsync(id, request, ct)));
+
+    [HttpGet("students/{userId:long}/plans")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<LearningPlanDto>>>> Plans(long userId, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<LearningPlanDto>>.Ok(await plans.ListAsync(userId, ct)));
+
+    /// <summary>Staff or the student's teacher; checked in the service.</summary>
+    [HttpPost("students/{userId:long}/plans")]
+    public async Task<ActionResult<ApiResponse<LearningPlanDto>>> CreatePlan(long userId, SaveLearningPlanRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LearningPlanDto>.Ok(await plans.CreateAsync(userId, request, ct)));
+
+    [HttpPut("plans/{id:long}")]
+    public async Task<ActionResult<ApiResponse<LearningPlanDto>>> UpdatePlan(long id, SaveLearningPlanRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LearningPlanDto>.Ok(await plans.UpdateAsync(id, request, ct)));
+
+    [HttpDelete("plans/{id:long}")]
+    public async Task<ActionResult<ApiResponse>> DeletePlan(long id, CancellationToken ct)
     {
-        await relationships.DeleteGroupAsync(id, ct);
-        return Ok(ApiResponse.Ok("Group deleted."));
+        await plans.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok("Plan deleted."));
+    }
+}
+
+/// <summary>Sales: leads, trial sessions and conversion into students.</summary>
+[ApiController]
+[Authorize]
+[Route("leads")]
+public sealed class LeadsController(ILeadService leads) : ControllerBase
+{
+    [HttpGet]
+    [HasPermission(Permissions.Leads.View)]
+    public async Task<ActionResult<ApiResponse<PagedResult<LeadDto>>>> List([FromQuery] LeadQuery query, CancellationToken ct) =>
+        Ok(ApiResponse<PagedResult<LeadDto>>.Ok(await leads.ListAsync(query, ct)));
+
+    [HttpGet("summary")]
+    [HasPermission(Permissions.Leads.View)]
+    public async Task<ActionResult<ApiResponse<LeadSummaryDto>>> Summary(CancellationToken ct) =>
+        Ok(ApiResponse<LeadSummaryDto>.Ok(await leads.SummaryAsync(ct)));
+
+    [HttpGet("{id:long}")]
+    [HasPermission(Permissions.Leads.View)]
+    public async Task<ActionResult<ApiResponse<LeadDto>>> Get(long id, CancellationToken ct) =>
+        Ok(ApiResponse<LeadDto>.Ok(await leads.GetAsync(id, ct)));
+
+    [HttpPost]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<LeadDto>>> Create(SaveLeadRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LeadDto>.Ok(await leads.CreateAsync(request, ct)));
+
+    [HttpPut("{id:long}")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<LeadDto>>> Update(long id, SaveLeadRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LeadDto>.Ok(await leads.UpdateAsync(id, request, ct)));
+
+    [HttpPut("{id:long}/status")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<LeadDto>>> SetStatus(long id, SetLeadStatusRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LeadDto>.Ok(await leads.SetStatusAsync(id, request, ct)));
+
+    [HttpDelete("{id:long}")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse>> Delete(long id, CancellationToken ct)
+    {
+        await leads.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok("Lead deleted."));
     }
 
-    [HttpPut("groups/{id:long}/students")]
-    [HasPermission(Permissions.Profiles.Manage)]
-    public async Task<ActionResult<ApiResponse<GroupDto>>> SetGroupStudents(long id, SetMembersRequest request, CancellationToken ct) =>
-        Ok(ApiResponse<GroupDto>.Ok(await relationships.SetGroupStudentsAsync(id, request.UserIds, ct)));
+    [HttpGet("{id:long}/activity")]
+    [HasPermission(Permissions.Leads.View)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<LeadActivityDto>>>> Activity(long id, CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<LeadActivityDto>>.Ok(await leads.ActivityAsync(id, ct)));
+
+    [HttpPost("{id:long}/activity")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<LeadActivityDto>>> AddNote(long id, AddLeadNoteRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LeadActivityDto>.Ok(await leads.AddNoteAsync(id, request, ct)));
+
+    [HttpPost("{id:long}/trial")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<LeadDto>>> ScheduleTrial(long id, ScheduleTrialRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LeadDto>.Ok(await leads.ScheduleTrialAsync(id, request, ct)));
+
+    /// <summary>The trial's teacher or sales records the outcome; checked in the service.</summary>
+    [HttpPut("{id:long}/trial/outcome")]
+    public async Task<ActionResult<ApiResponse<LeadDto>>> TrialOutcome(long id, TrialOutcomeRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LeadDto>.Ok(await leads.RecordTrialOutcomeAsync(id, request, ct)));
+
+    [HttpGet("{id:long}/trial/join-link")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<JoinLinkDto>>> TrialJoinLink(long id, CancellationToken ct) =>
+        Ok(ApiResponse<JoinLinkDto>.Ok(await leads.TrialJoinLinkAsync(id, ct)));
+
+    [HttpPost("{id:long}/convert")]
+    [HasPermission(Permissions.Leads.Manage)]
+    public async Task<ActionResult<ApiResponse<LeadDto>>> Convert(long id, ConvertLeadRequest request, CancellationToken ct) =>
+        Ok(ApiResponse<LeadDto>.Ok(await leads.ConvertAsync(id, request, ct)));
 }
 
 /// <summary>Courses and materials (US-024, US-036).</summary>

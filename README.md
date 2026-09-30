@@ -12,8 +12,8 @@ YARP gateway · Angular 21 (standalone, signals, zoneless, Material, ngx-transla
 |---|---|---|---|
 | Identity | 5101 | Academies, Users, Roles, Permissions; JWT issuing | US-007–013, 018, 019 |
 | Subscription | 5102 | Plans, limits, features, academy subscriptions | US-014–017 |
-| Academic | 5103 | Profiles, groups, courses, sessions, attendance, feedback, assignments | US-020–028, 036, 037, 041, 042 |
-| Finance | 5104 | Pay settings, student payments, salaries, expenses, reports | US-029–034, 039 |
+| Academic | 5103 | Profiles, subjects, enrollments, learning plans, sessions, attendance, session logs, assignments, leads and trials | US-020–028, 036, 037, 041, 042 |
+| Finance | 5104 | Pay settings, packages, per-subject billing in several currencies, payers, auto-pay, salaries, expenses, reports | US-029–034, 039 |
 | Engagement | 5105 | Notifications, dashboards, audit log | US-035, 038, 040, 043 |
 | Gateway | 5000 | Routes `/api/{identity,subscriptions,academic,finance,engagement}/**` | |
 | Client | 4200 | Angular SPA | |
@@ -127,6 +127,26 @@ Outside Development, migrations run with `--migrate` or `Database__MigrateOnStar
 - Set a strong `Internal:ApiKey` (shared by all services for `/internal/*` calls).
 - `Seed__Enabled` is only on in `appsettings.Development.json`.
 
+## Operating scope
+
+The academy teaches **online only**, and **every session is one teacher with one student**, in Quran, Arabic and
+Islamic studies, for students of any age. There are no groups and no in-person sessions.
+
+- **No fixed curriculum.** A student is enrolled in one or more subjects; for each, their teacher writes a plan
+  (goal, free-text reference, expected amount, target date) agreed with the family.
+- **Session log and report.** After each session the teacher logs what was covered, a rating, homework and notes,
+  plus memorisation, revision and mistakes for Quran subjects. Once the session is completed and logged, a report
+  goes (in-app and by email) to the guardian, or to the student when they are an adult with no guardian.
+- **Guardian and payer.** The guardian is optional. Who pays is the guardian by default, else the student, or any
+  parent account chosen on the Students page; invoices and payment notices go to them.
+- **Money.** Each subject can be billed on its own, from a ready-made package (e.g. 8/12/16/20 sessions of
+  30/45/60 minutes) or a price per session, in USD, EUR, GBP, SAR or EGP. Report totals are in the academy's base
+  currency, converted with the exchange rates set on Payment plans. A payer can save a card (Stripe) so each
+  invoice is charged automatically when it falls due; a refused card is retried daily, three times at most.
+- **Sales.** The Sales role (sales / customer service) works leads: follow-up notes, a free trial session with a
+  teacher (it blocks the teacher's slot, and the family gets a guest link to the teacher's room), the teacher's
+  assessment, and sign-up, which creates the student (and guardian) accounts and enrols the student.
+
 ## Delivery status
 
 All 44 stories (US-001 → US-043) are implemented:
@@ -149,12 +169,21 @@ All 44 stories (US-001 → US-043) are implemented:
 
 ### Integrations that need your credentials
 
+- **Stripe (one-off payments and automatic renewal):**
+  - `PAYMENTS_PROVIDER=Stripe` sends one-off payments through Stripe Checkout. Stripe charges every supported
+    currency (USD, EUR, GBP, SAR, EGP) as is.
+  - Saved cards: `AUTOPAY_PROVIDER` = `Stripe`, `Fake` (development: stores a test card, every charge succeeds) or
+    `None`. Empty means Stripe when `PAYMENTS_PROVIDER=Stripe`, otherwise Fake, so set it explicitly in production.
+  - Set `STRIPE_SECRET_KEY` and a webhook to `/api/finance/payments/webhooks/stripe` (events
+    `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`)
+    with its signing secret in `STRIPE_WEBHOOK_SECRET`. The card is entered on Stripe's page, never on ours.
 - **Online payments (US-039), PayPal:**
   - **Provider:** `Payments:Provider=Fake` pays instantly, for development. `PayPal` goes through PayPal Checkout (Orders v2 REST API, no SDK).
   - **Credentials:** create a REST app at developer.paypal.com and set `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and `PAYPAL_MODE` (`sandbox` or `live`).
-  - **Currency:** each academy bills in **USD or EGP** (Payment plans → academy currency).
-    - PayPal cannot charge EGP, so an EGP month is charged in USD at `PAYPAL_EGP_TO_USD` (`Payments:PayPal:ExchangeRates:EGP`).
-    - The parent confirms the converted amount before paying, and the month is credited in full in EGP.
+  - **Currency:** PayPal charges USD, EUR and GBP invoices as they are.
+    - PayPal cannot charge EGP or SAR, so such a month is charged in USD at `PAYPAL_EGP_TO_USD` / `PAYPAL_SAR_TO_USD`
+      (`Payments:PayPal:ExchangeRates:{EGP,SAR}`).
+    - The payer confirms the converted amount before paying, and the month is credited in full in its own currency.
     - `OnlinePayments` records both the credited amount and the amount charged.
   - **Flow:** checkout → PayPal approval → `/api/finance/payments/paypal/return`, where the server captures the order and returns the parent to `/parent`.
   - **Webhook (backstop):** add `/api/finance/payments/webhooks/paypal` in the PayPal app and set `PAYPAL_WEBHOOK_ID`.

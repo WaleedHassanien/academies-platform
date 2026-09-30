@@ -12,14 +12,15 @@ public interface IAcademicDbContext
     DbSet<Person> People { get; }
     DbSet<Student> Students { get; }
     DbSet<Teacher> Teachers { get; }
+    DbSet<TeacherCourse> TeacherCourses { get; }
     DbSet<Supervisor> Supervisors { get; }
     DbSet<Parent> Parents { get; }
     DbSet<WorkSchedule> WorkSchedules { get; }
     DbSet<SupervisorTeacher> SupervisorTeachers { get; }
     DbSet<TeacherStudent> TeacherStudents { get; }
-    DbSet<Group> Groups { get; }
-    DbSet<GroupStudent> GroupStudents { get; }
     DbSet<Course> Courses { get; }
+    DbSet<Enrollment> Enrollments { get; }
+    DbSet<LearningPlan> LearningPlans { get; }
     DbSet<Material> Materials { get; }
     DbSet<Session> Sessions { get; }
     DbSet<Attendance> Attendances { get; }
@@ -30,6 +31,8 @@ public interface IAcademicDbContext
     DbSet<Certificate> Certificates { get; }
     DbSet<PointEntry> Points { get; }
     DbSet<StudentBadge> Badges { get; }
+    DbSet<Lead> Leads { get; }
+    DbSet<LeadActivity> LeadActivities { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
@@ -86,20 +89,17 @@ public sealed class AccessGuard(IAcademicDbContext db, ICurrentUser user)
 
     public bool HasPermission(string permission) => user.HasPermission(permission);
 
-    public async Task<List<long>> TeacherStudentIdsAsync(long teacherUserId, CancellationToken ct = default)
-    {
-        var direct = db.TeacherStudents.Where(t => t.TeacherUserId == teacherUserId).Select(t => t.StudentUserId);
-        var viaGroups = db.GroupStudents
-            .Where(gs => db.Groups.Any(g => g.Id == gs.GroupId && g.TeacherUserId == teacherUserId))
-            .Select(gs => gs.StudentUserId);
-        return await direct.Union(viaGroups).ToListAsync(ct);
-    }
+    public bool IsSales => user.IsInRole(Roles.Sales);
+
+    public async Task<List<long>> TeacherStudentIdsAsync(long teacherUserId, CancellationToken ct = default) =>
+        await db.TeacherStudents.Where(t => t.TeacherUserId == teacherUserId).Select(t => t.StudentUserId).Distinct().ToListAsync(ct);
 
     public Task<List<long>> SupervisorTeacherIdsAsync(long supervisorUserId, CancellationToken ct = default) =>
         db.SupervisorTeachers.Where(s => s.SupervisorUserId == supervisorUserId).Select(s => s.TeacherUserId).ToListAsync(ct);
 
+    /// <summary>A parent's children: the students they are guardian of, or pay for.</summary>
     public Task<List<long>> ChildrenIdsAsync(long parentUserId, CancellationToken ct = default) =>
-        db.Students.Where(s => s.ParentUserId == parentUserId).Select(s => s.UserId).ToListAsync(ct);
+        db.Students.Where(s => s.ParentUserId == parentUserId || s.PayerUserId == parentUserId).Select(s => s.UserId).ToListAsync(ct);
 
     /// <summary>
     /// The students this caller may see, or null for "all in the academy" (staff and
@@ -139,10 +139,13 @@ public sealed class AccessGuard(IAcademicDbContext db, ICurrentUser user)
         return ids;
     }
 
-    /// <summary>Teachers whose sessions this caller may see, or null for all.</summary>
+    /// <summary>
+    /// Teachers whose sessions this caller may see, or null for all. Sales see every teacher's
+    /// timetable to find a slot for a trial session.
+    /// </summary>
     public async Task<HashSet<long>?> VisibleTeacherIdsAsync(CancellationToken ct = default)
     {
-        if (IsStaff || user.IsInRole(Roles.Accountant))
+        if (IsStaff || user.IsInRole(Roles.Accountant) || IsSales)
         {
             return null;
         }

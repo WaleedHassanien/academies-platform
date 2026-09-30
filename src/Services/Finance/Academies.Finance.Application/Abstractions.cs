@@ -26,6 +26,9 @@ public interface IFinanceDbContext
     DbSet<TeacherPayout> Payouts { get; }
     DbSet<TeacherPayoutLine> PayoutLines { get; }
     DbSet<MonthClose> MonthCloses { get; }
+    DbSet<Package> Packages { get; }
+    DbSet<StudentPayer> Payers { get; }
+    DbSet<AutoPayMandate> Mandates { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
@@ -33,12 +36,13 @@ public interface IFinanceDbContext
 public sealed record TeacherSessionCount(long TeacherUserId, int CompletedSessions);
 
 /// <summary>
-/// A one-to-one session and what happened to it, from Academic. <see cref="Counts"/>: the student
-/// is billed and the teacher is paid. <see cref="ExcuseResolution"/> is set for excused sessions.
+/// A session and what happened to it, from Academic. <see cref="Counts"/>: the student is billed and
+/// the teacher is paid. <see cref="ExcuseResolution"/> is set for excused sessions. <see cref="CourseId"/>
+/// picks the subject's billing.
 /// </summary>
 public sealed record LedgerSession(
     long SessionId, long TeacherUserId, long StudentUserId, DateTime StartsAtUtc, int DurationMinutes, string Outcome, bool Counts,
-    string? ExcuseResolution, long? MakeupOfSessionId);
+    string? ExcuseResolution, long? MakeupOfSessionId, long CourseId = 0);
 
 /// <summary>Reads from the Academic service.</summary>
 public interface IAcademicClient
@@ -113,6 +117,35 @@ public interface IPaymentGateway
     Task<GatewayCapture> CaptureAsync(string providerSessionId, CancellationToken ct = default);
 }
 
+/// <summary>Where to send the payer to save a card, identified by our <c>Reference</c>.</summary>
+public sealed record CardSetupRequest(string Reference, string? CustomerEmail, string? CustomerName, string Description);
+
+public sealed record CardSetupSession(string ProviderSetupId, string SetupUrl);
+
+/// <summary>The saved card, once the payer finished the provider's page.</summary>
+public sealed record SavedCard(string Reference, string CustomerId, string PaymentMethodId, string? Brand, string? Last4);
+
+/// <summary>An automatic charge on a saved card, in the invoice's own currency.</summary>
+public sealed record CardChargeRequest(string Reference, string CustomerId, string PaymentMethodId, decimal Amount, string Currency, string Description);
+
+public sealed record CardChargeResult(bool Succeeded, string? ProviderPaymentId, string? FailureReason);
+
+/// <summary>
+/// Saving a card and charging it later without the payer present (monthly renewal): Stripe, or Fake
+/// for development.
+/// </summary>
+public interface IAutoPayGateway
+{
+    string Name { get; }
+
+    Task<CardSetupSession> CreateCardSetupAsync(CardSetupRequest request, CancellationToken ct = default);
+
+    /// <summary>Reads the saved card from a finished setup; null if the payer didn't finish.</summary>
+    Task<SavedCard?> CompleteCardSetupAsync(string providerSetupId, CancellationToken ct = default);
+
+    Task<CardChargeResult> ChargeAsync(CardChargeRequest request, CancellationToken ct = default);
+}
+
 /// <summary>Drops cached report results for an academy whenever money data changes (US-034).</summary>
 public interface IReportCache
 {
@@ -172,8 +205,24 @@ public sealed class FinanceAccess(IFinanceDbContext db, ICurrentUser user)
             ids.Add(Me);
         }
 
+        // Whoever was chosen to pay sees the invoices they pay.
+        ids.UnionWith(await db.Payers.Where(p => p.PayerUserId == Me).Select(p => p.StudentUserId).ToListAsync(ct));
         return ids;
     }
+
+    /// <summary>Who pays for each student: the chosen payer, else the guardian, else the student.</summary>
+    public async Task<Dictionary<long, long>> PayersAsync(IReadOnlyCollection<long> studentUserIds, CancellationToken ct = default)
+    {
+        var ids = studentUserIds.Distinct().ToList();
+        var chosen = (await db.Payers.Where(p => ids.Contains(p.StudentUserId)).ToListAsync(ct))
+            .GroupBy(p => p.StudentUserId).ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.Id).First().PayerUserId);
+        var guardians = (await db.Guardians.Where(g => ids.Contains(g.StudentUserId)).ToListAsync(ct))
+            .GroupBy(g => g.StudentUserId).ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.Id).First().ParentUserId);
+        return ids.ToDictionary(id => id, id => chosen.TryGetValue(id, out var p) ? p : guardians.TryGetValue(id, out var g) ? g : id);
+    }
+
+    public async Task<long> PayerOfAsync(long studentUserId, CancellationToken ct = default) =>
+        (await PayersAsync([studentUserId], ct))[studentUserId];
 
     public async Task EnsureCanSeeStudentAsync(long studentUserId, CancellationToken ct = default)
     {

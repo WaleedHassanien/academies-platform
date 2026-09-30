@@ -111,6 +111,10 @@ services:
       Payments__PayPal__Mode: ${PAYPAL_MODE:-sandbox}
       Payments__PayPal__WebhookId: ${PAYPAL_WEBHOOK_ID:-}
       Payments__PayPal__ExchangeRates__EGP: ${PAYPAL_EGP_TO_USD:-0.0206}
+      Payments__PayPal__ExchangeRates__SAR: ${PAYPAL_SAR_TO_USD:-0.2667}
+      Payments__Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Payments__Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      Payments__AutoPay__Provider: ${AUTOPAY_PROVIDER:-}
     depends_on: *dotnet-deps
 
   engagement-api:

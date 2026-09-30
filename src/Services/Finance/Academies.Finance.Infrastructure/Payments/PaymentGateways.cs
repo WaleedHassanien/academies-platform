@@ -15,8 +15,12 @@ public sealed class PaymentOptions
 {
     public const string Section = "Payments";
 
-    /// <summary>"Fake" (development: pays instantly) or "PayPal".</summary>
+    /// <summary>"Fake" (development: pays instantly), "PayPal" or "Stripe".</summary>
     public string Provider { get; set; } = "Fake";
+
+    public StripeOptions Stripe { get; set; } = new();
+
+    public AutoPayOptions AutoPay { get; set; } = new();
 
     /// <summary>Public URL the browser uses for /api (the SPA origin, which proxies /api to the gateway).</summary>
     public string PublicBaseUrl { get; set; } = "http://localhost:4200";
@@ -25,6 +29,16 @@ public sealed class PaymentOptions
     public string ReturnUrl { get; set; } = "http://localhost:4200/parent";
 
     public PayPalOptions PayPal { get; set; } = new();
+}
+
+/// <summary>Saving cards for automatic monthly charges.</summary>
+public sealed class AutoPayOptions
+{
+    /// <summary>"Stripe", "Fake" (development) or "None". Empty: Stripe when Payments:Provider is Stripe, otherwise Fake.</summary>
+    public string? Provider { get; set; }
+
+    /// <summary>Where the payer lands after saving a card.</summary>
+    public string? ReturnUrl { get; set; }
 }
 
 public sealed class PayPalOptions
@@ -38,12 +52,15 @@ public sealed class PayPalOptions
     /// <summary>Webhook id from the PayPal app settings, needed to verify webhook signatures.</summary>
     public string? WebhookId { get; set; }
 
-    /// <summary>Currency PayPal charges in.</summary>
+    /// <summary>Currency PayPal charges in when it can't charge the invoice's own currency.</summary>
     public string Currency { get; set; } = "USD";
 
+    /// <summary>Invoice currencies PayPal charges as they are.</summary>
+    public static readonly IReadOnlyList<string> Native = ["USD", "EUR", "GBP"];
+
     /// <summary>
-    /// Rates into <see cref="Currency"/> for academy currencies PayPal can't charge, e.g.
-    /// <c>"EGP": 0.0206</c> (1 EGP = 0.0206 USD). PayPal does not support EGP.
+    /// Rates into <see cref="Currency"/> for currencies PayPal can't charge, e.g. <c>"EGP": 0.0206</c>
+    /// (1 EGP = 0.0206 USD) or <c>"SAR": 0.2667</c>. PayPal supports neither EGP nor SAR.
     /// </summary>
     public Dictionary<string, decimal> ExchangeRates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -54,9 +71,9 @@ public sealed class PayPalOptions
     /// <summary>Converts an academy-currency amount into what PayPal will charge.</summary>
     public (decimal Amount, string Currency) ToChargeAmount(decimal amount, string currency)
     {
-        if (currency.Equals(Currency, StringComparison.OrdinalIgnoreCase))
+        if (currency.Equals(Currency, StringComparison.OrdinalIgnoreCase) || Native.Contains(currency.ToUpperInvariant()))
         {
-            return (Math.Round(amount, 2, MidpointRounding.AwayFromZero), Currency);
+            return (Math.Round(amount, 2, MidpointRounding.AwayFromZero), currency.ToUpperInvariant());
         }
 
         if (!ExchangeRates.TryGetValue(currency, out var rate) || rate <= 0)

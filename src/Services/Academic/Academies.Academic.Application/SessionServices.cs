@@ -3,22 +3,21 @@ using Academies.BuildingBlocks.Application.Abstractions;
 using Academies.BuildingBlocks.Application.Exceptions;
 using Academies.Contracts.Events;
 using Academies.Contracts.Security;
-using Academies.Contracts.Subscriptions;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 
 namespace Academies.Academic.Application;
 
 /// <summary>
-/// For one-to-one sessions (<see cref="StudentUserId"/> set) it also carries that student's
-/// attendance, the supervisor's absence decision and any excuse, so dashboards need one call.
+/// A session with its student's attendance, the supervisor's absence decision and any excuse, so
+/// dashboards need one call. Every session is online and one-to-one.
 /// </summary>
 public sealed record SessionDto(
-    long Id, string Title, long CourseId, string? CourseName, long? GroupId, string? GroupName,
-    long TeacherUserId, string? TeacherName, DateTime StartsAtUtc, DateTime EndsAtUtc, string Type,
-    string? MeetingUrl, string? Location, string Status, string? Notes,
-    long? StudentUserId = null, string? StudentName = null, long? MakeupOfSessionId = null,
-    string? AttendanceStatus = null, bool? AbsenceCounted = null, SessionExcuseDto? Excuse = null)
+    long Id, string Title, long CourseId, string? CourseName, string? CourseKind,
+    long TeacherUserId, string? TeacherName, DateTime StartsAtUtc, DateTime EndsAtUtc,
+    string? MeetingUrl, string Status, string? Notes,
+    long StudentUserId, string? StudentName, long? MakeupOfSessionId = null,
+    string? AttendanceStatus = null, bool? AbsenceCounted = null, SessionExcuseDto? Excuse = null, DateTime? ReportSentOnUtc = null)
 {
     public int DurationMinutes => (int)Math.Round((EndsAtUtc - StartsAtUtc).TotalMinutes);
 }
@@ -28,37 +27,43 @@ public sealed record SessionExcuseDto(
     long? MakeupSessionId, string? ResolutionNote, DateTime CreatedOnUtc);
 
 public sealed record SessionQuery(
-    DateTime FromUtc, DateTime ToUtc, long? TeacherUserId = null, long? GroupId = null, long? StudentUserId = null, string? Status = null);
+    DateTime FromUtc, DateTime ToUtc, long? TeacherUserId = null, long? StudentUserId = null, long? CourseId = null, string? Status = null);
 
 /// <summary>
-/// <see cref="RepeatWeeks"/> &gt; 1 creates the same slot weekly (US-025 weekly timetable).
-/// <see cref="StudentUserId"/> makes it a one-to-one session (then <see cref="GroupId"/> must be empty).
+/// <see cref="RepeatWeeks"/> &gt; 1 creates the same slot weekly (US-025 weekly timetable). An empty
+/// <see cref="MeetingUrl"/> puts the session in the teacher's own room.
 /// </summary>
 public sealed record SaveSessionRequest(
-    string Title, long CourseId, long? GroupId, long TeacherUserId, DateTime StartsAtUtc, int DurationMinutes,
-    SessionType Type, string? Location, string? MeetingUrl, bool GenerateMeetingLink, string? Notes, int RepeatWeeks = 1,
-    long? StudentUserId = null);
+    string Title, long CourseId, long TeacherUserId, long StudentUserId, DateTime StartsAtUtc, int DurationMinutes,
+    string? MeetingUrl = null, string? Notes = null, int RepeatWeeks = 1);
+
+/// <summary>The teacher's log of a session. Every field is optional; the Quran fields apply to Quran subjects.</summary>
+public sealed record SessionLogDto(
+    int? Rating, string? Comment, string? Accomplished, string? Homework, string? Memorization, string? Revision, int? Mistakes);
 
 public sealed record RosterItemDto(
-    long StudentUserId, string FullName, string? AttendanceStatus, string? AttendanceNote, int? Rating, string? Comment);
+    long StudentUserId, string FullName, string? AttendanceStatus, string? AttendanceNote, int? Rating, string? Comment, SessionLogDto? Log = null);
 
 public sealed record AttendanceItem(long StudentUserId, AttendanceStatus Status, string? Note);
 
 public sealed record RecordAttendanceRequest(IReadOnlyList<AttendanceItem> Items);
 
-public sealed record FeedbackItem(long StudentUserId, int Rating, string? Comment);
+public sealed record FeedbackItem(
+    long StudentUserId, int? Rating, string? Comment, string? Accomplished = null, string? Homework = null, string? Memorization = null,
+    string? Revision = null, int? Mistakes = null);
 
 public sealed record SaveFeedbackRequest(IReadOnlyList<FeedbackItem> Items);
 
 public sealed record FeedbackDto(
     long Id, long SessionId, string SessionTitle, DateTime SessionStartsAtUtc, long StudentUserId, string? StudentName,
-    long TeacherUserId, string? TeacherName, int Rating, string? Comment, DateTime CreatedOnUtc);
+    long TeacherUserId, string? TeacherName, int? Rating, string? Comment, DateTime CreatedOnUtc, SessionLogDto? Log = null, string? CourseName = null);
 
 /// <summary>A personal link into an online session; <see cref="IsModerator"/> for the teacher and staff.</summary>
 public sealed record JoinLinkDto(string Url, bool IsModerator, DateTime ExpiresAtUtc);
 
-/// <summary>A session from one student's point of view: whether they attended and what the teacher said.</summary>
-public sealed record StudentSessionDto(SessionDto Session, string? AttendanceStatus, string? AttendanceNote, int? Rating, string? Comment);
+/// <summary>A session from the student's point of view: whether they attended and the teacher's log.</summary>
+public sealed record StudentSessionDto(
+    SessionDto Session, string? AttendanceStatus, string? AttendanceNote, int? Rating, string? Comment, SessionLogDto? Log = null);
 
 public interface ISessionService
 {
@@ -79,11 +84,10 @@ public interface ISessionService
     Task<IReadOnlyList<StudentSessionDto>> StudentSessionsAsync(long studentUserId, CancellationToken ct = default);
 }
 
-/// <summary>Scheduling (US-025), attendance (US-026), feedback (US-027) and online links (US-037).</summary>
+/// <summary>Scheduling (US-025), attendance (US-026), the session log (US-027) and online rooms (US-037).</summary>
 internal sealed partial class SessionService(
     IAcademicDbContext db,
     AccessGuard guard,
-    IEntitlementsProvider entitlements,
     IMeetingLinkGenerator meetings,
     IGamificationService gamification,
     IEventPublisher events,
@@ -104,16 +108,15 @@ internal sealed partial class SessionService(
             q = q.Where(s => s.TeacherUserId == teacherId);
         }
 
-        if (query.GroupId is { } groupId)
-        {
-            q = q.Where(s => s.GroupId == groupId);
-        }
-
         if (query.StudentUserId is { } studentId)
         {
             await guard.EnsureCanViewStudentAsync(studentId, ct);
-            q = q.Where(s => s.StudentUserId == studentId
-                             || (s.GroupId != null && db.GroupStudents.Any(gs => gs.GroupId == s.GroupId && gs.StudentUserId == studentId)));
+            q = q.Where(s => s.StudentUserId == studentId);
+        }
+
+        if (query.CourseId is { } courseId)
+        {
+            q = q.Where(s => s.CourseId == courseId);
         }
 
         if (Enum.TryParse<SessionStatus>(query.Status, true, out var status))
@@ -144,24 +147,22 @@ internal sealed partial class SessionService(
             {
                 Title = request.Title.Trim(),
                 CourseId = request.CourseId,
-                GroupId = request.GroupId,
                 StudentUserId = request.StudentUserId,
                 TeacherUserId = request.TeacherUserId,
                 StartsAtUtc = start,
                 EndsAtUtc = start.AddMinutes(request.DurationMinutes),
-                Type = request.Type,
-                Location = request.Location,
                 MeetingUrl = request.MeetingUrl,
                 Notes = request.Notes,
             };
             await EnsureNoConflictAsync(session, ct);
-            ApplyRoom(session, request.GenerateMeetingLink);
+            ApplyRoom(session);
 
             created.Add(session);
             db.Sessions.Add(session);
         }
 
-        await EnsureTeacherLinkAsync(request.TeacherUserId, request.StudentUserId, ct);
+        await db.EnsureTeacherLinkAsync(request.TeacherUserId, request.StudentUserId, ct);
+        await db.EnsureEnrollmentAsync(request.StudentUserId, request.CourseId, request.TeacherUserId, Today, ct);
         await db.SaveChangesAsync(ct);
         return await ToDtosAsync(created, ct);
     }
@@ -179,20 +180,18 @@ internal sealed partial class SessionService(
         await ValidateReferencesAsync(request, ct);
         session.Title = request.Title.Trim();
         session.CourseId = request.CourseId;
-        session.GroupId = request.GroupId;
         session.StudentUserId = request.StudentUserId;
         session.TeacherUserId = request.TeacherUserId;
         session.StartsAtUtc = request.StartsAtUtc;
         session.EndsAtUtc = request.StartsAtUtc.AddMinutes(request.DurationMinutes);
-        session.Type = request.Type;
-        session.Location = request.Location;
         session.MeetingUrl = request.MeetingUrl;
         session.Notes = request.Notes;
         session.ReminderSentOnUtc = null;
         await EnsureNoConflictAsync(session, ct);
-        ApplyRoom(session, request.GenerateMeetingLink);
+        ApplyRoom(session);
 
-        await EnsureTeacherLinkAsync(request.TeacherUserId, request.StudentUserId, ct);
+        await db.EnsureTeacherLinkAsync(request.TeacherUserId, request.StudentUserId, ct);
+        await db.EnsureEnrollmentAsync(request.StudentUserId, request.CourseId, request.TeacherUserId, Today, ct);
         await db.SaveChangesAsync(ct);
         return await GetAsync(id, ct);
     }
@@ -217,6 +216,7 @@ internal sealed partial class SessionService(
             session.Status = SessionStatus.Completed;
             session.CompletedOnUtc = clock.GetUtcNow().UtcDateTime;
             await events.PublishAsync(new SessionCompleted(session.AcademyId, session.Id, session.TeacherUserId, session.StartsAtUtc), ct);
+            await TrySendReportAsync(session, ct);
             await db.SaveChangesAsync(ct);
         }
 
@@ -237,12 +237,11 @@ internal sealed partial class SessionService(
         return await GetAsync(id, ct);
     }
 
+    /// <summary>Moves the session (back) into the teacher's own room, replacing a link typed in by hand.</summary>
     public async Task<SessionDto> GenerateMeetingLinkAsync(long id, CancellationToken ct = default)
     {
         var session = await LoadAsync(id, ct);
         guard.EnsureCanRunSession(session);
-        await entitlements.EnsureFeatureAsync(session.AcademyId, FeatureKeys.OnlineSessions, ct);
-        session.Type = SessionType.Online;
         session.MeetingUrl = meetings.RoomUrl(session.AcademyId, session.TeacherUserId);
         await db.SaveChangesAsync(ct);
         return await GetAsync(id, ct);
@@ -251,18 +250,13 @@ internal sealed partial class SessionService(
     /// <summary>
     /// The caller's own link into the session's room, signed with their name and email from the
     /// system. The session's teacher, their supervisor and staff join as moderator and can open it
-    /// any time; the students on the roster (and their parents) from 30 minutes before the start
-    /// until 15 minutes after the end, so a student can't wander into the next student's session
-    /// in the same teacher's room. A link typed in by hand (Zoom, Meet...) is returned as is.
+    /// any time; the student (and their parent) from 30 minutes before the start until 15 minutes
+    /// after the end, so a student can't wander into the next student's session in the same
+    /// teacher's room. A link typed in by hand (Zoom, Meet...) is returned as is.
     /// </summary>
     public async Task<JoinLinkDto> JoinAsync(long id, CancellationToken ct = default)
     {
         var session = await LoadAsync(id, ct);
-        if (session.Type != SessionType.Online || string.IsNullOrWhiteSpace(session.MeetingUrl))
-        {
-            throw new BusinessRuleException("This session has no online room.");
-        }
-
         if (session.Status is SessionStatus.Cancelled or SessionStatus.Excused)
         {
             throw new BusinessRuleException("This session isn't taking place.");
@@ -272,18 +266,18 @@ internal sealed partial class SessionService(
         var moderator = session.TeacherUserId == me || await CanDecideAsync(session, ct);
         if (!moderator)
         {
-            var roster = await RosterStudentIdsAsync(session, ct);
             var children = guard.IsInRole(Roles.Parent) ? await guard.ChildrenIdsAsync(me, ct) : [];
-            if (!roster.Contains(me) && !roster.Intersect(children).Any())
+            if (session.StudentUserId != me && !children.Contains(session.StudentUserId))
             {
                 throw new ForbiddenAccessException("You are not in this session.");
             }
         }
 
         var now = clock.GetUtcNow().UtcDateTime;
-        if (!meetings.IsOurRoom(session.MeetingUrl))
+        var url = string.IsNullOrWhiteSpace(session.MeetingUrl) ? meetings.RoomUrl(session.AcademyId, session.TeacherUserId) : session.MeetingUrl;
+        if (!meetings.IsOurRoom(url))
         {
-            return new JoinLinkDto(session.MeetingUrl, moderator, session.EndsAtUtc);
+            return new JoinLinkDto(url, moderator, session.EndsAtUtc);
         }
 
         var opens = session.StartsAtUtc.AddMinutes(-30);
@@ -340,17 +334,12 @@ internal sealed partial class SessionService(
     }
 
     /// <summary>
-    /// Online sessions in our rooms always point at the teacher's own room (so changing the teacher
-    /// moves it); a link typed in by hand is kept.
+    /// Sessions without a hand-typed link, or with one of our rooms, always point at the teacher's
+    /// own room (so changing the teacher moves it); a link typed in by hand is kept.
     /// </summary>
-    private void ApplyRoom(Session session, bool generate)
+    private void ApplyRoom(Session session)
     {
-        if (session.Type != SessionType.Online)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(session.MeetingUrl) ? generate : meetings.IsOurRoom(session.MeetingUrl))
+        if (string.IsNullOrWhiteSpace(session.MeetingUrl) || meetings.IsOurRoom(session.MeetingUrl))
         {
             session.MeetingUrl = meetings.RoomUrl(session.AcademyId == 0 ? guard.AcademyId : session.AcademyId, session.TeacherUserId);
         }
@@ -372,15 +361,14 @@ internal sealed partial class SessionService(
             throw new BusinessRuleException("Attendance cannot be recorded for a cancelled or excused session.");
         }
 
-        var roster = await RosterStudentIdsAsync(session, ct);
-        var unknown = request.Items.Select(i => i.StudentUserId).Except(roster).ToList();
+        var unknown = request.Items.Select(i => i.StudentUserId).Where(s => s != session.StudentUserId).Distinct().ToList();
         if (unknown.Count > 0)
         {
-            throw new BusinessRuleException($"Students {string.Join(", ", unknown)} are not in this session's roster.");
+            throw new BusinessRuleException($"Students {string.Join(", ", unknown)} are not in this session.");
         }
 
         var existing = await db.Attendances.Where(a => a.SessionId == id).ToListAsync(ct);
-        var parents = await db.Students.Where(s => roster.Contains(s.UserId)).ToDictionaryAsync(s => s.UserId, s => s.ParentUserId, ct);
+        var parent = await db.Students.Where(s => s.UserId == session.StudentUserId).Select(s => s.ParentUserId).FirstOrDefaultAsync(ct);
         var changed = new List<Attendance>();
 
         foreach (var item in request.Items)
@@ -390,6 +378,7 @@ internal sealed partial class SessionService(
             {
                 row = new Attendance { SessionId = id, StudentUserId = item.StudentUserId };
                 db.Attendances.Add(row);
+                existing.Add(row);
             }
             else if (row.Status == item.Status && row.Note == item.Note)
             {
@@ -406,8 +395,7 @@ internal sealed partial class SessionService(
         foreach (var row in changed)
         {
             await events.PublishAsync(
-                new AttendanceRecorded(session.AcademyId, id, row.StudentUserId, row.Status.ToString(), parents.GetValueOrDefault(row.StudentUserId), session.StartsAtUtc),
-                ct);
+                new AttendanceRecorded(session.AcademyId, id, row.StudentUserId, row.Status.ToString(), parent, session.StartsAtUtc), ct);
             await gamification.SetAwardAsync(
                 row.StudentUserId, "attendance", row.Id, GamificationRules.PointsFor(row.Status), $"Attendance: {session.Title}", ct);
         }
@@ -416,18 +404,18 @@ internal sealed partial class SessionService(
         return await BuildRosterAsync(session, ct);
     }
 
+    /// <summary>Saves the session log. A completed session's report then goes out (once).</summary>
     public async Task<IReadOnlyList<RosterItemDto>> SaveFeedbackAsync(long id, SaveFeedbackRequest request, CancellationToken ct = default)
     {
         var session = await LoadAsync(id, ct);
         guard.EnsureCanRunSession(session);
-        var roster = await RosterStudentIdsAsync(session, ct);
         var existing = await db.Feedbacks.Where(f => f.SessionId == id).ToListAsync(ct);
 
         foreach (var item in request.Items)
         {
-            if (!roster.Contains(item.StudentUserId))
+            if (item.StudentUserId != session.StudentUserId)
             {
-                throw new BusinessRuleException($"Student {item.StudentUserId} is not in this session's roster.");
+                throw new BusinessRuleException($"Student {item.StudentUserId} is not in this session.");
             }
 
             var row = existing.FirstOrDefault(f => f.StudentUserId == item.StudentUserId);
@@ -435,53 +423,57 @@ internal sealed partial class SessionService(
             {
                 row = new SessionFeedback { SessionId = id, StudentUserId = item.StudentUserId, TeacherUserId = session.TeacherUserId };
                 db.Feedbacks.Add(row);
+                existing.Add(row);
             }
 
             row.Rating = item.Rating;
-            row.Comment = item.Comment;
+            row.Comment = Clean(item.Comment);
+            row.Accomplished = Clean(item.Accomplished);
+            row.Homework = Clean(item.Homework);
+            row.Memorization = Clean(item.Memorization);
+            row.Revision = Clean(item.Revision);
+            row.Mistakes = item.Mistakes;
         }
 
         await db.SaveChangesAsync(ct);
+        if (await TrySendReportAsync(session, ct))
+        {
+            await db.SaveChangesAsync(ct);
+        }
+
         return await BuildRosterAsync(session, ct);
     }
 
     /// <summary>
-    /// Feedback for one student (US-027). The student, their parent, their teachers and
-    /// supervisors, and academy staff may see it.
+    /// Session log entries for one student (US-027). The student, their parent, their teachers and
+    /// supervisors, and academy staff may see them.
     /// </summary>
     public async Task<IReadOnlyList<FeedbackDto>> StudentFeedbackAsync(long studentUserId, int take, CancellationToken ct = default)
     {
         await guard.EnsureCanViewStudentAsync(studentUserId, ct);
         var rows = await db.Feedbacks.AsNoTracking()
             .Where(f => f.StudentUserId == studentUserId)
-            .Join(db.Sessions, f => f.SessionId, s => s.Id, (f, s) => new { f, s.Title, s.StartsAtUtc })
+            .Join(db.Sessions, f => f.SessionId, s => s.Id, (f, s) => new { f, s.Title, s.StartsAtUtc, s.CourseId })
             .OrderByDescending(x => x.StartsAtUtc)
             .Take(Math.Clamp(take, 1, 200))
             .ToListAsync(ct);
         var names = await db.People.NamesAsync(rows.SelectMany(r => new[] { r.f.StudentUserId, r.f.TeacherUserId }), ct);
+        var courseIds = rows.Select(r => r.CourseId).Distinct().ToList();
+        var courses = await db.Courses.Where(c => courseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
 
         return rows.Select(r => new FeedbackDto(
             r.f.Id, r.f.SessionId, r.Title, r.StartsAtUtc, r.f.StudentUserId, names.GetValueOrDefault(r.f.StudentUserId),
-            r.f.TeacherUserId, names.GetValueOrDefault(r.f.TeacherUserId), r.f.Rating, r.f.Comment, r.f.CreatedOnUtc)).ToList();
+            r.f.TeacherUserId, names.GetValueOrDefault(r.f.TeacherUserId), r.f.Rating, r.f.Comment, r.f.CreatedOnUtc,
+            ToLog(r.f), courses.GetValueOrDefault(r.CourseId))).ToList();
     }
 
-    /// <summary>
-    /// A student's sessions, newest first: those of their groups, the one-to-one sessions of
-    /// their own teachers (the same rule as the roster), and any session they have attendance in.
-    /// </summary>
+    /// <summary>A student's sessions, newest first, with their attendance and the teacher's log.</summary>
     public async Task<IReadOnlyList<StudentSessionDto>> StudentSessionsAsync(long studentUserId, CancellationToken ct = default)
     {
         await guard.EnsureCanViewStudentAsync(studentUserId, ct);
 
-        var groupIds = db.GroupStudents.Where(gs => gs.StudentUserId == studentUserId).Select(gs => gs.GroupId);
-        var teacherIds = db.TeacherStudents.Where(t => t.StudentUserId == studentUserId).Select(t => t.TeacherUserId);
-        var attended = db.Attendances.Where(a => a.StudentUserId == studentUserId).Select(a => a.SessionId);
-
         var sessions = await db.Sessions.AsNoTracking()
-            .Where(s => s.StudentUserId == studentUserId
-                        || (s.GroupId != null && groupIds.Contains(s.GroupId.Value))
-                        || (s.GroupId == null && s.StudentUserId == null && teacherIds.Contains(s.TeacherUserId))
-                        || attended.Contains(s.Id))
+            .Where(s => s.StudentUserId == studentUserId)
             .OrderByDescending(s => s.StartsAtUtc)
             .Take(1000)
             .ToListAsync(ct);
@@ -495,13 +487,59 @@ internal sealed partial class SessionService(
             .ToDictionaryAsync(f => f.SessionId, ct);
 
         var dtos = await ToDtosAsync(sessions, ct);
-        return dtos.Select(d => new StudentSessionDto(
-            d,
-            attendance.GetValueOrDefault(d.Id)?.Status.ToString(), attendance.GetValueOrDefault(d.Id)?.Note,
-            feedback.GetValueOrDefault(d.Id)?.Rating, feedback.GetValueOrDefault(d.Id)?.Comment)).ToList();
+        return dtos.Select(d =>
+        {
+            var log = feedback.GetValueOrDefault(d.Id);
+            return new StudentSessionDto(
+                d, attendance.GetValueOrDefault(d.Id)?.Status.ToString(), attendance.GetValueOrDefault(d.Id)?.Note, log?.Rating, log?.Comment,
+                log is null ? null : ToLog(log));
+        }).ToList();
+    }
+
+    // ---- session reports ----
+
+    /// <summary>
+    /// Once a session is completed and its log is written, the report goes to the guardian (or the
+    /// adult student when there is no guardian). It is sent once; later edits don't resend it.
+    /// </summary>
+    private async Task<bool> TrySendReportAsync(Session session, CancellationToken ct)
+    {
+        if (session.Status != SessionStatus.Completed || session.ReportSentOnUtc is not null)
+        {
+            return false;
+        }
+
+        var log = db.Feedbacks.Local.FirstOrDefault(f => f.SessionId == session.Id && f.StudentUserId == session.StudentUserId && !f.IsDeleted)
+                  ?? await db.Feedbacks.AsNoTracking().FirstOrDefaultAsync(f => f.SessionId == session.Id && f.StudentUserId == session.StudentUserId, ct);
+        if (log is null)
+        {
+            return false;
+        }
+
+        var student = await db.Students.AsNoTracking().FirstOrDefaultAsync(s => s.UserId == session.StudentUserId, ct);
+        var attendance = await db.Attendances.AsNoTracking()
+            .Where(a => a.SessionId == session.Id && a.StudentUserId == session.StudentUserId)
+            .Select(a => (AttendanceStatus?)a.Status).FirstOrDefaultAsync(ct);
+        var names = await db.People.NamesAsync([session.StudentUserId, session.TeacherUserId], ct);
+        var course = await db.Courses.AsNoTracking().Where(c => c.Id == session.CourseId).Select(c => c.Name).FirstOrDefaultAsync(ct);
+
+        await events.PublishAsync(new SessionReportReady(
+            session.AcademyId, session.Id, session.StudentUserId, names.GetValueOrDefault(session.StudentUserId, $"#{session.StudentUserId}"),
+            [student?.ReportRecipient ?? session.StudentUserId], course ?? session.Title, names.GetValueOrDefault(session.TeacherUserId, string.Empty),
+            session.StartsAtUtc, attendance?.ToString(), log.Rating, log.Accomplished, log.Homework, log.Memorization, log.Revision, log.Mistakes,
+            log.Comment), ct);
+        session.ReportSentOnUtc = clock.GetUtcNow().UtcDateTime;
+        return true;
     }
 
     // ---- helpers ----
+
+    private DateOnly Today => DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+
+    private static string? Clean(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    internal static SessionLogDto ToLog(SessionFeedback f) =>
+        new(f.Rating, f.Comment, f.Accomplished, f.Homework, f.Memorization, f.Revision, f.Mistakes);
 
     /// <summary>Restricts sessions to what the caller may see (US-028).</summary>
     private async Task<IQueryable<Session>> ScopeAsync(IQueryable<Session> q, CancellationToken ct)
@@ -513,19 +551,7 @@ internal sealed partial class SessionService(
         }
 
         var students = await guard.VisibleStudentIdsAsync(ct) ?? [];
-        return q.Where(s => teachers.Contains(s.TeacherUserId)
-                            || (s.StudentUserId != null && students.Contains(s.StudentUserId.Value))
-                            || (s.GroupId != null && db.GroupStudents.Any(gs => gs.GroupId == s.GroupId && students.Contains(gs.StudentUserId))));
-    }
-
-    /// <summary>Scheduling a one-to-one session makes the teacher responsible for the student, if they weren't already.</summary>
-    private async Task EnsureTeacherLinkAsync(long teacherUserId, long? studentUserId, CancellationToken ct)
-    {
-        if (studentUserId is { } studentId
-            && !await db.TeacherStudents.AnyAsync(t => t.TeacherUserId == teacherUserId && t.StudentUserId == studentId, ct))
-        {
-            db.TeacherStudents.Add(new TeacherStudent { TeacherUserId = teacherUserId, StudentUserId = studentId });
-        }
+        return q.Where(s => teachers.Contains(s.TeacherUserId) || students.Contains(s.StudentUserId));
     }
 
     private void EnsureCanSchedule(long teacherUserId)
@@ -544,75 +570,44 @@ internal sealed partial class SessionService(
             throw new NotFoundException(nameof(Course), request.CourseId);
         }
 
-        if (request.GroupId is { } groupId && !await db.Groups.AnyAsync(g => g.Id == groupId, ct))
-        {
-            throw new NotFoundException(nameof(Group), groupId);
-        }
-
-        if (request.StudentUserId is { } studentId)
-        {
-            if (request.GroupId is not null)
-            {
-                throw new BusinessRuleException("A one-to-one session can't also belong to a group.");
-            }
-
-            await db.People.EnsureRoleAsync(studentId, Roles.Student, ct);
-        }
-
+        await db.People.EnsureRoleAsync(request.StudentUserId, Roles.Student, ct);
         await db.People.EnsureRoleAsync(request.TeacherUserId, Roles.Teacher, ct);
-        if (request.Type == SessionType.Online)
-        {
-            await entitlements.EnsureFeatureAsync(guard.AcademyId, FeatureKeys.OnlineSessions, ct);
-        }
+        await db.EnsureTeacherQualifiedAsync(request.TeacherUserId, request.CourseId, ct);
     }
 
-    /// <summary>A teacher, a group or a one-to-one student can't be in two live sessions at once.</summary>
+    /// <summary>A teacher or a student can't be in two live sessions at once; a teacher's trial sessions count too.</summary>
     private async Task EnsureNoConflictAsync(Session session, CancellationToken ct)
     {
         var clash = await db.Sessions.AsNoTracking()
             .Where(s => s.Id != session.Id && s.Status != SessionStatus.Cancelled && s.Status != SessionStatus.Excused)
             .Where(s => s.StartsAtUtc < session.EndsAtUtc && session.StartsAtUtc < s.EndsAtUtc)
-            .Where(s => s.TeacherUserId == session.TeacherUserId
-                        || (session.GroupId != null && s.GroupId == session.GroupId)
-                        || (session.StudentUserId != null && s.StudentUserId == session.StudentUserId))
+            .Where(s => s.TeacherUserId == session.TeacherUserId || s.StudentUserId == session.StudentUserId)
             .FirstOrDefaultAsync(ct);
 
         if (clash is not null)
         {
-            var who = clash.TeacherUserId == session.TeacherUserId ? "The teacher"
-                : session.StudentUserId != null && clash.StudentUserId == session.StudentUserId ? "The student"
-                : "The group";
+            var who = clash.TeacherUserId == session.TeacherUserId ? "The teacher" : "The student";
             throw new ConflictException($"{who} already has '{clash.Title}' at {clash.StartsAtUtc:yyyy-MM-dd HH:mm} UTC.");
         }
-    }
 
-    private async Task<List<long>> RosterStudentIdsAsync(Session session, CancellationToken ct)
-    {
-        if (session.StudentUserId is { } only)
+        var trial = await db.Leads.AsNoTracking()
+            .Where(l => l.TrialTeacherUserId == session.TeacherUserId && l.TrialStatus == TrialStatus.Scheduled)
+            .Where(l => l.TrialStartsAtUtc < session.EndsAtUtc && session.StartsAtUtc < l.TrialEndsAtUtc)
+            .Select(l => l.TrialStartsAtUtc)
+            .FirstOrDefaultAsync(ct);
+        if (trial is { } at)
         {
-            return [only];
+            throw new ConflictException($"The teacher has a trial session at {at:yyyy-MM-dd HH:mm} UTC.");
         }
-
-        var fromGroup = session.GroupId is { } groupId
-            ? await db.GroupStudents.Where(gs => gs.GroupId == groupId).Select(gs => gs.StudentUserId).ToListAsync(ct)
-            : await db.TeacherStudents.Where(t => t.TeacherUserId == session.TeacherUserId).Select(t => t.StudentUserId).ToListAsync(ct);
-        var recorded = await db.Attendances.Where(a => a.SessionId == session.Id).Select(a => a.StudentUserId).ToListAsync(ct);
-        return fromGroup.Union(recorded).ToList();
     }
 
     private async Task<IReadOnlyList<RosterItemDto>> BuildRosterAsync(Session session, CancellationToken ct)
     {
-        var ids = await RosterStudentIdsAsync(session, ct);
-        var names = await db.People.NamesAsync(ids, ct);
-        var attendance = await db.Attendances.Where(a => a.SessionId == session.Id).ToDictionaryAsync(a => a.StudentUserId, ct);
-        var feedback = await db.Feedbacks.Where(f => f.SessionId == session.Id).ToDictionaryAsync(f => f.StudentUserId, ct);
-
-        return ids.Select(id => new RosterItemDto(
-                id, names.GetValueOrDefault(id, $"#{id}"),
-                attendance.GetValueOrDefault(id)?.Status.ToString(), attendance.GetValueOrDefault(id)?.Note,
-                feedback.GetValueOrDefault(id)?.Rating, feedback.GetValueOrDefault(id)?.Comment))
-            .OrderBy(r => r.FullName)
-            .ToList();
+        var id = session.StudentUserId;
+        var name = (await db.People.NamesAsync([id], ct)).GetValueOrDefault(id, $"#{id}");
+        var attendance = await db.Attendances.AsNoTracking().FirstOrDefaultAsync(a => a.SessionId == session.Id && a.StudentUserId == id, ct);
+        var log = await db.Feedbacks.AsNoTracking().FirstOrDefaultAsync(f => f.SessionId == session.Id && f.StudentUserId == id, ct);
+        return [new RosterItemDto(id, name, attendance?.Status.ToString(), attendance?.Note, log?.Rating, log?.Comment, log is null ? null : ToLog(log))];
     }
 
     private async Task<Session> LoadAsync(long id, CancellationToken ct) =>
@@ -620,31 +615,28 @@ internal sealed partial class SessionService(
 
     internal async Task<List<SessionDto>> ToDtosAsync(IReadOnlyList<Session> sessions, CancellationToken ct)
     {
-        var names = await db.People.NamesAsync(
-            sessions.Select(s => s.TeacherUserId).Concat(sessions.Where(s => s.StudentUserId.HasValue).Select(s => s.StudentUserId!.Value)), ct);
+        var names = await db.People.NamesAsync(sessions.Select(s => s.TeacherUserId).Concat(sessions.Select(s => s.StudentUserId)), ct);
         var courseIds = sessions.Select(s => s.CourseId).Distinct().ToList();
-        var groupIds = sessions.Where(s => s.GroupId.HasValue).Select(s => s.GroupId!.Value).Distinct().ToList();
-        var courses = await db.Courses.Where(c => courseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
-        var groups = await db.Groups.Where(g => groupIds.Contains(g.Id)).ToDictionaryAsync(g => g.Id, g => g.Name, ct);
+        var courses = await db.Courses.Where(c => courseIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 
-        // One-to-one extras: the student's attendance and the latest excuse per session.
-        var soloIds = sessions.Where(s => s.StudentUserId.HasValue).Select(s => s.Id).ToList();
-        var attendance = soloIds.Count == 0 ? [] : (await db.Attendances.AsNoTracking()
-                .Where(a => soloIds.Contains(a.SessionId))
+        // The student's attendance and the latest excuse per session.
+        var ids = sessions.Select(s => s.Id).ToList();
+        var attendance = ids.Count == 0 ? [] : (await db.Attendances.AsNoTracking()
+                .Where(a => ids.Contains(a.SessionId))
                 .Select(a => new { a.SessionId, a.StudentUserId, a.Status })
                 .ToListAsync(ct))
             .Where(a => sessions.Any(s => s.Id == a.SessionId && s.StudentUserId == a.StudentUserId))
-            .ToDictionary(a => a.SessionId, a => a.Status.ToString());
-        var excuses = soloIds.Count == 0 ? [] : (await db.Excuses.AsNoTracking().Where(e => soloIds.Contains(e.SessionId)).ToListAsync(ct))
+            .GroupBy(a => a.SessionId)
+            .ToDictionary(g => g.Key, g => g.First().Status.ToString());
+        var excuses = ids.Count == 0 ? [] : (await db.Excuses.AsNoTracking().Where(e => ids.Contains(e.SessionId)).ToListAsync(ct))
             .GroupBy(e => e.SessionId)
             .ToDictionary(g => g.Key, g => ToExcuseDto(g.OrderByDescending(e => e.Id).First()));
 
         return sessions.Select(s => new SessionDto(
-            s.Id, s.Title, s.CourseId, courses.GetValueOrDefault(s.CourseId), s.GroupId,
-            s.GroupId is { } g ? groups.GetValueOrDefault(g) : null, s.TeacherUserId, names.GetValueOrDefault(s.TeacherUserId),
-            s.StartsAtUtc, s.EndsAtUtc, s.Type.ToString(), s.MeetingUrl, s.Location, s.Status.ToString(), s.Notes,
-            s.StudentUserId, s.StudentUserId is { } sid ? names.GetValueOrDefault(sid) : null, s.MakeupOfSessionId,
-            attendance.GetValueOrDefault(s.Id), s.AbsenceCounted, excuses.GetValueOrDefault(s.Id))).ToList();
+            s.Id, s.Title, s.CourseId, courses.GetValueOrDefault(s.CourseId)?.Name, courses.GetValueOrDefault(s.CourseId)?.Kind.ToString(),
+            s.TeacherUserId, names.GetValueOrDefault(s.TeacherUserId), s.StartsAtUtc, s.EndsAtUtc, s.MeetingUrl, s.Status.ToString(), s.Notes,
+            s.StudentUserId, names.GetValueOrDefault(s.StudentUserId), s.MakeupOfSessionId,
+            attendance.GetValueOrDefault(s.Id), s.AbsenceCounted, excuses.GetValueOrDefault(s.Id), s.ReportSentOnUtc)).ToList();
     }
 
     internal static SessionExcuseDto ToExcuseDto(SessionExcuse e) => new(
@@ -659,11 +651,13 @@ internal sealed class SaveSessionValidator : AbstractValidator<SaveSessionReques
         RuleFor(x => x.Title).NotEmpty().MaximumLength(200);
         RuleFor(x => x.CourseId).GreaterThan(0);
         RuleFor(x => x.TeacherUserId).GreaterThan(0);
+        RuleFor(x => x.StudentUserId).GreaterThan(0).WithMessage("Choose the student.");
         RuleFor(x => x.DurationMinutes).InclusiveBetween(15, 600);
         RuleFor(x => x.RepeatWeeks).InclusiveBetween(1, 52);
-        RuleFor(x => x.Type).IsInEnum();
-        RuleFor(x => x.Location).MaximumLength(200);
-        RuleFor(x => x.MeetingUrl).MaximumLength(500);
+        RuleFor(x => x.MeetingUrl).MaximumLength(500)
+            .Must(u => Uri.TryCreate(u, UriKind.Absolute, out var uri) && (uri.Scheme == "https" || uri.Scheme == "http"))
+            .When(x => !string.IsNullOrWhiteSpace(x.MeetingUrl))
+            .WithMessage("Enter a full http(s) link, or leave it empty to use the teacher's room.");
         RuleFor(x => x.Notes).MaximumLength(2000);
     }
 }
@@ -688,8 +682,16 @@ internal sealed class SaveFeedbackValidator : AbstractValidator<SaveFeedbackRequ
         RuleFor(x => x.Items).NotEmpty();
         RuleForEach(x => x.Items).ChildRules(i =>
         {
-            i.RuleFor(f => f.Rating).InclusiveBetween(1, 5);
+            i.RuleFor(f => f.Rating).InclusiveBetween(1, 5).When(f => f.Rating.HasValue);
             i.RuleFor(f => f.Comment).MaximumLength(1000);
+            i.RuleFor(f => f.Accomplished).MaximumLength(2000);
+            i.RuleFor(f => f.Homework).MaximumLength(1000);
+            i.RuleFor(f => f.Memorization).MaximumLength(300);
+            i.RuleFor(f => f.Revision).MaximumLength(300);
+            i.RuleFor(f => f.Mistakes).InclusiveBetween(0, 1000).When(f => f.Mistakes.HasValue);
+            i.RuleFor(f => f).Must(f => f.Rating.HasValue || f.Mistakes.HasValue
+                                        || new[] { f.Comment, f.Accomplished, f.Homework, f.Memorization, f.Revision }.Any(t => !string.IsNullOrWhiteSpace(t)))
+                .WithMessage("Write at least one thing in the session log.");
         });
     }
 }
